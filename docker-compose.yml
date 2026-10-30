@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: envshare-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: envshare
+      POSTGRES_PASSWORD: envshare_dev_password
+      POSTGRES_DB: envshare
+    ports:
+      - "5432:5432"
+    volumes:
+      - envshare-pgdata:/var/lib/postgresql/data
+
+volumes:
+  envshare-pgdata:
