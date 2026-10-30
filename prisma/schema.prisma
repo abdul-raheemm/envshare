@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id               String          @id @default(cuid())
+  email            String          @unique
+  name             String
+  passwordHash     String
+  createdAt        DateTime        @default(now())
+  ownedProjects    Project[]
+  memberships      ProjectMember[]
+  updatedVariables Variable[]
+}
+
+model Project {
+  id           String          @id @default(cuid())
+  name         String
+  ownerId      String
+  createdAt    DateTime        @default(now())
+  owner        User            @relation(fields: [ownerId], references: [id])
+  members      ProjectMember[]
+  environments Environment[]
+}
+
+model ProjectMember {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model Environment {
+  id        String     @id @default(cuid())
+  projectId String
+  name      String
+  createdAt DateTime   @default(now())
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  variables Variable[]
+
+  @@unique([projectId, name])
+}
+
+model Variable {
+  id            String      @id @default(cuid())
+  environmentId String
+  key           String
+  value         String
+  isSensitive   Boolean     @default(false)
+  iv            String?
+  authTag       String?
+  version       Int         @default(1)
+  updatedById   String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  updatedBy     User        @relation(fields: [updatedById], references: [id])
+
+  @@unique([environmentId, key])
+}
