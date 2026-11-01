@@ -30,3 +30,36 @@ export async function requireProjectOwner(userId: string, projectId: string) {
   }
   return access;
 }
+
+export async function requireEnvironmentAccess(userId: string, environmentId: string) {
+  const environment = await prisma.environment.findUnique({
+    where: { id: environmentId },
+    select: { id: true, name: true, projectId: true },
+  });
+  if (!environment) throw new ApiError(404, "Environment not found");
+
+  const access = await getProjectAccess(userId, environment.projectId);
+  if (!access) throw new ApiError(404, "Environment not found");
+
+  return environment;
+}
+
+export async function requireVariableAccess(userId: string, variableId: string) {
+  const variable = await prisma.variable.findUnique({
+    where: { id: variableId },
+    select: {
+      id: true,
+      key: true,
+      value: true,
+      version: true,
+      environmentId: true,
+      environment: { select: { projectId: true } },
+    },
+  });
+  if (!variable) throw new ApiError(404, "Variable not found");
+
+  const access = await getProjectAccess(userId, variable.environment.projectId);
+  if (!access) throw new ApiError(404, "Variable not found");
+
+  return variable;
+}

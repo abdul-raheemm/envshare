@@ -6,10 +6,12 @@ import { InviteMemberForm } from "@/components/projects/InviteMemberForm";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { VariablesPanel } from "@/components/variables/VariablesPanel";
 import { getProjectAccess } from "@/lib/access";
 import { listEnvironments } from "@/lib/environments";
 import { listMembers } from "@/lib/projects";
 import { requireUserForPage } from "@/lib/session";
+import { listVariables } from "@/lib/variables";
 
 export default async function ProjectPage({
   params,
@@ -34,6 +36,8 @@ export default async function ProjectPage({
   const envParam = Array.isArray(query.env) ? query.env[0] : query.env;
   const activeEnv = environments.find((e) => e.id === envParam) ?? environments[0] ?? null;
 
+  const variables = activeEnv ? await listVariables(user.id, activeEnv.id) : [];
+
   const ownerId = access.project.ownerId;
   const ownerName = members.find((m) => m.id === ownerId)?.name ?? "the owner";
 
@@ -56,10 +60,11 @@ export default async function ProjectPage({
               environments={environments}
               activeId={activeEnv.id}
             />
-            {/* Temporary: replaced by the variables table in Step 1.7 */}
-            <p className="text-sm text-muted">
-              Variables for {activeEnv.name} will appear here in the next step.
-            </p>
+            <VariablesPanel
+              key={activeEnv.id}
+              environmentId={activeEnv.id}
+              variables={variables}
+            />
           </>
         ) : (
           <p className="text-sm text-muted">

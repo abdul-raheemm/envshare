@@ -6,15 +6,26 @@ import type { InputHTMLAttributes } from "react";
 type Props = InputHTMLAttributes<HTMLInputElement> & {
   label: string;
   error?: string;
+  hideLabel?: boolean;
 };
 
-export function Input({ label, error, id, className = "", ...rest }: Props) {
+export function Input({
+  label,
+  error,
+  hideLabel = false,
+  id,
+  className = "",
+  ...rest
+}: Props) {
   const autoId = useId();
   const inputId = id ?? autoId;
 
   return (
     <div className="space-y-1">
-      <label htmlFor={inputId} className="block text-sm font-medium text-gray-700">
+      <label
+        htmlFor={inputId}
+        className={`${hideLabel ? "sr-only" : "block"} text-sm font-medium text-gray-700`}
+      >
         {label}
       </label>
       <input

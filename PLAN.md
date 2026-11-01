@@ -29,11 +29,55 @@
 | Encryption (Phase 2) | Node `crypto`, AES-256-GCM |
 | Tests | Vitest (needed mainly for the Phase 3 parser) |
 
-### Assumptions to document in your README
-1. The project owner is also stored as a row in `ProjectMember`, so access checks are one query.
-2. Roles for now: **owner** (can invite members, delete the project) and **member** (can view and edit variables).
-3. Environment variable keys are case-sensitive and unique per environment.
-4. Importing never deletes keys that are missing from the pasted text.
+## Assumptions and design decisions
+
+### Accounts and sessions
+1. Emails are trimmed and lowercased before saving, and must be unique.
+2. Passwords must be at least 8 characters and at most 72 bytes (bcrypt ignores anything beyond 72 bytes). They are hashed with bcrypt (cost 12).
+3. Sessions use a signed JWT in an httpOnly, SameSite=Lax cookie that lasts 7 days (Secure flag in production). The user is re-read from the database on every request, so a deleted user's old cookie stops working.
+4. Login gives the same message ("Invalid email or password") for an unknown email and a wrong password, and takes about the same time for both.
+5. Signup does tell the visitor when an email is already registered, because the brief asks for that kind of clear message. This is a known trade-off.
+6. Not in this version: password reset, email verification, and rate limiting on login (rate limiting is planned for the Step 1.9 pass).
+
+### Projects and membership
+7. The project owner is also stored as a `ProjectMember` row, so every access check is one query.
+8. Two roles: **owner** (can invite members) and **member** (can view and edit all environments and variables in the project). There are no per-environment permissions.
+9. Anyone logged in can create a project and becomes its owner. Project names don't have to be unique (max 100 characters).
+10. Members are added immediately by email (no pending invitations), and only registered users can be added. Only the owner can invite.
+11. Non-members get a **404** (not 403) for projects, environments and variables, so IDs can't be probed. A member who is not the owner gets a **403** on owner-only actions.
+12. All members can see the member list, including emails.
+13. Not in this version: removing members, renaming projects, deleting projects (not required by the brief).
+
+### Environments
+14. New projects automatically get Development, Staging and Production. Projects created before this feature have none and can add them manually.
+15. Any member can add an environment.
+16. Environment names are unique per project, ignoring upper/lower case and surrounding spaces (max 50 characters).
+17. Environments cannot be renamed or deleted in this version.
+18. The selected environment tab is stored in the URL (`?env=<id>`); an invalid or foreign ID falls back to the first tab.
+
+### Variables
+19. Keys match `^[A-Za-z_][A-Za-z0-9_]*$` (max 128 characters), are **case-sensitive**, and are unique per environment (`port` and `PORT` are different keys).
+20. Values may be empty or span several lines (max 10,000 characters) and are stored exactly as entered (not trimmed).
+21. Any member can add, edit, delete and copy variables in any environment of their project. Variables are listed alphabetically by key.
+22. Edits use optimistic locking: each variable has a version number, and a save only succeeds if the version is unchanged. A stale edit shows "This variable was changed by someone else. Reload and try again". Saving without changing anything does not bump the version.
+23. Deleting a variable is permanent in Phase 1 (Phase 2 history will keep a record).
+24. In Phase 1, values are stored as plain text and a banner says so. Phase 2 adds encryption.
+25. Importing a pasted `.env` never deletes keys missing from the pasted text (Phase 3).
+
+### Architecture
+26. Stack: Next.js 16 (App Router), Prisma 7.10.0 (pinned exactly), PostgreSQL 16 in Docker for development, Tailwind CSS 4 as the only styling system, zod for validation.
+27. Pages read data through server components that call functions in `src/lib/`; changes go through API routes. Every data function takes the user's ID and checks access itself.
+28. The login check in the page layout is a convenience only. The real protection is the access check inside every data function and API route.
+29. All API errors use one shape: `{ error: "message", fields?: { fieldName: "message" } }`.
+30. All variable writes live in `src/lib/variables.ts`, so Phase 2 history logging only has to change that file.
+31. Next.js Cache Components is turned off, because every page depends on who is logged in. There is no middleware.
+32. Required environment variables: `DATABASE_URL`, `JWT_SECRET` (at least 32 characters). `.env` is never committed; `.env.example` is.
+
+### Deviations from the original plan
+- Prisma was set up by hand (no `prisma init`) with the `prisma.config.ts` file and a driver adapter, which Prisma 7 requires.
+- Dependencies were installed in the step that first uses them, not all in Step 1.1.
+- The listed `GET` endpoints for projects, members, environments and variables were not built. Pages read the same data directly on the server, with the same access checks.
+- Default environments are auto-created (the plan marked this as optional).
 
 ### Full data model (create the whole schema once, so later phases need no rework)
 
@@ -148,10 +192,10 @@ model Variable {
 - [ ✅] Pages: `/dashboard` (project list + create form), `/projects/[id]` (overview + members panel; invite form visible to owner only).
 
 ## Step 1.6: Environments
-- [ ] `POST /api/projects/:id/environments`: unique name per project ("This environment already exists").
-- [ ] `GET /api/projects/:id/environments`.
-- [ ] Optionally auto-create Development, Staging, Production when a project is created.
-- [ ] UI: environment tabs on the project page.
+- [✅] `POST /api/projects/:id/environments`: unique name per project ("This environment already exists").
+- [✅] `GET /api/projects/:id/environments`.
+- [✅] Optionally auto-create Development, Staging, Production when a project is created.
+- [✅] UI: environment tabs on the project page.
 
 ## Step 1.7: Variable CRUD (plain text)
 - [ ] `GET /api/environments/:id/variables`

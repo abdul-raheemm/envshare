@@ -52,3 +52,30 @@ export const createEnvironmentSchema = z.object({
     .min(1, "Environment name is required")
     .max(50, "Environment name is too long"),
 });
+
+const variableKey = z
+  .string()
+  .trim()
+  .min(1, "Key is required")
+  .max(128, "Key is too long")
+  .regex(
+    /^[A-Za-z_][A-Za-z0-9_]*$/,
+    "Key must start with a letter or underscore and contain only letters, numbers and underscores"
+  );
+
+const variableValue = z.string().max(10000, "Value is too long (maximum 10,000 characters)");
+
+export const createVariableSchema = z.object({
+  key: variableKey,
+  value: variableValue,
+});
+
+export const updateVariableSchema = z
+  .object({
+    key: variableKey.optional(),
+    value: variableValue.optional(),
+    version: z.number().int().min(1),
+  })
+  .refine((d) => d.key !== undefined || d.value !== undefined, {
+    message: "Nothing to update",
+  });
