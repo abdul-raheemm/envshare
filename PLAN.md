@@ -115,29 +115,29 @@ model Variable {
 > ⚠️ **During Phase 1, values are stored as plain text. Do not enter real secrets while testing.**
 
 ## Step 1.1: Repo and tooling
-- [ ] Create the Next.js app (TypeScript, Tailwind, App Router) and init git.
-- [ ] Install: `prisma @prisma/client bcryptjs jose zod` (plus `vitest` for later).
-- [ ] Create `.env` and `.env.example` with `DATABASE_URL` and `JWT_SECRET`. Add `.env` to `.gitignore` (an env manager project that leaks its own `.env` looks bad).
-- [ ] Set up a local Postgres database (Docker or a hosted free tier).
+- [✅ ] Create the Next.js app (TypeScript, Tailwind, App Router) and init git.
+- [✅ ] Install: `prisma @prisma/client bcryptjs jose zod` (plus `vitest` for later).
+- [✅ ] Create `.env` and `.env.example` with `DATABASE_URL` and `JWT_SECRET`. Add `.env` to `.gitignore` (an env manager project that leaks its own `.env` looks bad).
+- [✅ ] Set up a local Postgres database (Docker or a hosted free tier).
 
 ## Step 1.2: Database schema
-- [ ] Paste the schema above into `prisma/schema.prisma`, run `prisma migrate dev`.
-- [ ] Create a `lib/db.ts` that exports a single Prisma client instance.
-- [ ] Write a small seed script (2 users, 1 project, 3 environments) for demos.
+- [✅ ] Paste the schema above into `prisma/schema.prisma`, run `prisma migrate dev`.
+- [✅ ] Create a `lib/db.ts` that exports a single Prisma client instance.
+- [✅ ] Write a small seed script (2 users, 1 project, 3 environments) for demos.
 
 ## Step 1.3: UI foundation (do this early so everything stays uniform)
-- [ ] Define Tailwind theme colors (primary, danger, muted) in the config.
-- [ ] Build reusable components: `Button` (primary/secondary/danger), `Input` (with label and error text), `Card`, `Modal`, `Alert`, `PageHeader`.
-- [ ] Build one shared layout with a navbar (app name, user name, logout).
-- [ ] Rule: **no page may use ad-hoc button or input styles.** Use only these components.
+- [✅ ] Define Tailwind theme colors (primary, danger, muted) in the config.
+- [✅ ] Build reusable components: `Button` (primary/secondary/danger), `Input` (with label and error text), `Card`, `Modal`, `Alert`, `PageHeader`.
+- [✅ ] Build one shared layout with a navbar (app name, user name, logout).
+- [ ✅] Rule: **no page may use ad-hoc button or input styles.** Use only these components.
 
 ## Step 1.4: Authentication
-- [ ] `POST /api/auth/signup`: validate email format and password length (8+), reject duplicates ("An account with this email already exists"), hash with bcrypt, store.
-- [ ] `POST /api/auth/login`: verify the hash, set the JWT cookie. Use the **same generic error** for wrong email and wrong password ("Invalid email or password").
-- [ ] `POST /api/auth/logout`: clear the cookie.
-- [ ] Helper `getCurrentUser(request)` that returns the user or null.
-- [ ] Middleware or helper that redirects unauthenticated users to `/login`.
-- [ ] Pages: `/signup`, `/login`.
+- [ ✅] `POST /api/auth/signup`: validate email format and password length (8+), reject duplicates ("An account with this email already exists"), hash with bcrypt, store.
+- [✅ ] `POST /api/auth/login`: verify the hash, set the JWT cookie. Use the **same generic error** for wrong email and wrong password ("Invalid email or password").
+- [✅ ] `POST /api/auth/logout`: clear the cookie.
+- [✅ ] Helper `getCurrentUser(request)` that returns the user or null.
+- [✅ ] Middleware or helper that redirects unauthenticated users to `/login`.
+- [✅ ] Pages: `/signup`, `/login`.
 
 ## Step 1.5: Projects and membership
 - [ ] Helper `requireProjectAccess(userId, projectId)`: looks up `ProjectMember`; throws 403/404 if none. **Every project, environment, and variable route must call this.**

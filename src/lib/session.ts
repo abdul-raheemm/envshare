@@ -1,6 +1,9 @@
+import { redirect } from "next/navigation";
+import { ApiError } from "@/lib/errors";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
+
 
 const COOKIE_NAME = "envshare_session";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
@@ -63,3 +66,17 @@ export async function getCurrentUser() {
     select: { id: true, email: true, name: true },
   });
 }
+
+   // For API routes: throws a 401 error if nobody is logged in
+   export async function requireUser() {
+     const user = await getCurrentUser();
+     if (!user) throw new ApiError(401, "Please log in to continue");
+     return user;
+   }
+
+   // For pages: sends logged-out visitors to the login page
+   export async function requireUserForPage() {
+     const user = await getCurrentUser();
+     if (!user) redirect("/login");
+     return user;
+   }

@@ -32,3 +32,15 @@ export function fieldErrors(error: z.ZodError): Record<string, string> {
   }
   return out;
 }
+
+export const createProjectSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Project name is required")
+    .max(100, "Project name is too long"),
+});
+
+export const inviteMemberSchema = z.object({
+  email: emailField,
+});
