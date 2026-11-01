@@ -79,6 +79,30 @@
 - The listed `GET` endpoints for projects, members, environments and variables were not built. Pages read the same data directly on the server, with the same access checks.
 - Default environments are auto-created (the plan marked this as optional).
 
+### Authorization audit (Step 1.8)
+
+| Endpoint / page | Login check | Resource check | Outsider result |
+|---|---|---|---|
+| POST /api/projects | requireUser | owner = session user | n/a |
+| POST /api/projects/:id/members | requireUser | requireProjectOwner | 404 (non-member), 403 (member, not owner) |
+| POST /api/projects/:id/environments | requireUser | requireProjectAccess | 404 |
+| POST /api/environments/:id/variables | requireUser | requireEnvironmentAccess | 404 |
+| PATCH /api/variables/:id | requireUser | requireVariableAccess | 404 |
+| DELETE /api/variables/:id | requireUser | requireVariableAccess | 404 |
+| /dashboard | requireUserForPage | list filtered by membership | n/a |
+| /projects/:id | requireUserForPage | getProjectAccess, else notFound | 404 page |
+
+Public by design: signup, login, logout.
+Missing and inaccessible resources return the same 404 message, so IDs cannot be probed.
+Mutating endpoints accept only application/json (415 otherwise). Logged-out requests get 401.
+Tested: 11 scripted attacks as a non-member, the same 11 logged out, page URL tampering,
+a tampered session cookie, and a database check that nothing changed.
+
+### Added in Step 1.9
+33. After 5 failed logins for an email, that email is locked for up to 15 minutes. The counter is kept in memory, so it resets when the server restarts and works for a single server only; a production deployment would use a shared store such as Redis. Because the lock is per email, someone could lock a known email out for 15 minutes; this is an accepted trade-off.
+34. Server logs record only the type of an error (for example a database error code), never error messages, request bodies, or values.
+35. All endpoints that read a body accept only application/json (415 otherwise).
+
 ### Full data model (create the whole schema once, so later phases need no rework)
 
 ```prisma
