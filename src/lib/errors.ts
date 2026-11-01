@@ -38,6 +38,10 @@ export async function parseBody<S extends z.ZodType>(
   request: Request,
   schema: S
 ): Promise<z.infer<S>> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new ApiError(415, "Unsupported content type");
+  }
   let body: unknown;
   try {
     body = await request.json();

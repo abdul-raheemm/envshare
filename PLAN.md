@@ -198,11 +198,11 @@ model Variable {
 - [✅] UI: environment tabs on the project page.
 
 ## Step 1.7: Variable CRUD (plain text)
-- [ ] `GET /api/environments/:id/variables`
-- [ ] `POST /api/environments/:id/variables`: validate key format (`^[A-Za-z_][A-Za-z0-9_]*$`), reject duplicate keys ("This key already exists"), set `updatedById`.
-- [ ] `PATCH /api/variables/:id`: edit key or value. Send the current `version`; if it doesn't match, return a conflict ("This variable was changed by someone else. Reload and try again") and increment the version on success.
-- [ ] `DELETE /api/variables/:id`: with a confirmation modal in the UI.
-- [ ] UI: table of key/value rows, "Add variable" form, inline edit, a clear **Copy** button on each value, delete button.
+- [✅ ] `GET /api/environments/:id/variables`
+- [✅ ] `POST /api/environments/:id/variables`: validate key format (`^[A-Za-z_][A-Za-z0-9_]*$`), reject duplicate keys ("This key already exists"), set `updatedById`.
+- [ ✅] `PATCH /api/variables/:id`: edit key or value. Send the current `version`; if it doesn't match, return a conflict ("This variable was changed by someone else. Reload and try again") and increment the version on success.
+- [✅ ] `DELETE /api/variables/:id`: with a confirmation modal in the UI.
+- [✅ ] UI: table of key/value rows, "Add variable" form, inline edit, a clear **Copy** button on each value, delete button.
 
 ## Step 1.8: Authorization sweep (do not skip)
 - [ ] Walk through every route and confirm it checks membership. For variable routes, load the variable, then its environment, then its project, then check access.
