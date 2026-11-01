@@ -44,3 +44,11 @@ export const createProjectSchema = z.object({
 export const inviteMemberSchema = z.object({
   email: emailField,
 });
+
+export const createEnvironmentSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Environment name is required")
+    .max(50, "Environment name is too long"),
+});

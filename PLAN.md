@@ -140,12 +140,12 @@ model Variable {
 - [✅ ] Pages: `/signup`, `/login`.
 
 ## Step 1.5: Projects and membership
-- [ ] Helper `requireProjectAccess(userId, projectId)`: looks up `ProjectMember`; throws 403/404 if none. **Every project, environment, and variable route must call this.**
-- [ ] `POST /api/projects`: create the project and, in the same transaction, insert the owner as a `ProjectMember`.
-- [ ] `GET /api/projects`: list projects the current user is a member of.
-- [ ] `POST /api/projects/:id/members`: owner only. Takes an email; errors: "No registered user with this email", "User is already a member".
-- [ ] `GET /api/projects/:id/members`: list members.
-- [ ] Pages: `/dashboard` (project list + create form), `/projects/[id]` (overview + members panel; invite form visible to owner only).
+- [ ✅] Helper `requireProjectAccess(userId, projectId)`: looks up `ProjectMember`; throws 403/404 if none. **Every project, environment, and variable route must call this.**
+- [✅ ] `POST /api/projects`: create the project and, in the same transaction, insert the owner as a `ProjectMember`.
+- [✅ ] `GET /api/projects`: list projects the current user is a member of.
+- [ ✅] `POST /api/projects/:id/members`: owner only. Takes an email; errors: "No registered user with this email", "User is already a member".
+- [ ✅] `GET /api/projects/:id/members`: list members.
+- [ ✅] Pages: `/dashboard` (project list + create form), `/projects/[id]` (overview + members panel; invite form visible to owner only).
 
 ## Step 1.6: Environments
 - [ ] `POST /api/projects/:id/environments`: unique name per project ("This environment already exists").

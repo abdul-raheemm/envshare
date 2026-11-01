@@ -2,10 +2,24 @@ import { prisma } from "@/lib/db";
 import { requireProjectAccess, requireProjectOwner } from "@/lib/access";
 import { ApiError, isUniqueViolation } from "@/lib/errors";
 
-// The nested create makes the project and the owner's membership in one atomic step
+const DEFAULT_ENVIRONMENTS = ["Development", "Staging", "Production"];
+
+// The nested creates make the project, the owner's membership and the default
+// environments in one atomic step. The createdAt offsets keep the tabs in order.
 export async function createProject(userId: string, name: string) {
+  const now = Date.now();
   return prisma.project.create({
-    data: { name, ownerId: userId, members: { create: { userId } } },
+    data: {
+      name,
+      ownerId: userId,
+      members: { create: { userId } },
+      environments: {
+        create: DEFAULT_ENVIRONMENTS.map((envName, i) => ({
+          name: envName,
+          createdAt: new Date(now + i),
+        })),
+      },
+    },
     select: { id: true, name: true },
   });
 }

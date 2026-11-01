@@ -1,25 +1,39 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AddEnvironmentForm } from "@/components/projects/AddEnvironmentForm";
+import { EnvironmentTabs } from "@/components/projects/EnvironmentTabs";
 import { InviteMemberForm } from "@/components/projects/InviteMemberForm";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getProjectAccess } from "@/lib/access";
+import { listEnvironments } from "@/lib/environments";
 import { listMembers } from "@/lib/projects";
 import { requireUserForPage } from "@/lib/session";
 
 export default async function ProjectPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ projectId: string }>;
+  searchParams: Promise<{ env?: string | string[] }>;
 }) {
   const { projectId } = await params;
+  const query = await searchParams;
   const user = await requireUserForPage();
 
   const access = await getProjectAccess(user.id, projectId);
   if (!access) notFound();
 
-  const members = await listMembers(user.id, projectId);
+  const [environments, members] = await Promise.all([
+    listEnvironments(user.id, projectId),
+    listMembers(user.id, projectId),
+  ]);
+
+  // Only environments of THIS project can be selected; anything else falls back to the first
+  const envParam = Array.isArray(query.env) ? query.env[0] : query.env;
+  const activeEnv = environments.find((e) => e.id === envParam) ?? environments[0] ?? null;
+
   const ownerId = access.project.ownerId;
   const ownerName = members.find((m) => m.id === ownerId)?.name ?? "the owner";
 
@@ -32,6 +46,29 @@ export default async function ProjectPage({
         title={access.project.name}
         description={access.isOwner ? "You own this project" : `Owned by ${ownerName}`}
       />
+
+      <Card className="space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900">Environments</h2>
+        {activeEnv ? (
+          <>
+            <EnvironmentTabs
+              projectId={projectId}
+              environments={environments}
+              activeId={activeEnv.id}
+            />
+            {/* Temporary: replaced by the variables table in Step 1.7 */}
+            <p className="text-sm text-muted">
+              Variables for {activeEnv.name} will appear here in the next step.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-muted">
+            No environments yet. Add your first one below.
+          </p>
+        )}
+        <AddEnvironmentForm projectId={projectId} />
+      </Card>
+
       <Card className="space-y-4">
         <h2 className="text-lg font-semibold text-gray-900">Members</h2>
         <ul className="divide-y divide-border">
