@@ -1,33 +1,37 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { ApiError, errorResponse, parseBody } from "@/lib/errors";
 import { DUMMY_HASH, verifyPassword } from "@/lib/password";
+import { clearFailures, getLockStatus, recordFailure } from "@/lib/rateLimit";
 import { createSession } from "@/lib/session";
-import { fieldErrors, loginSchema } from "@/lib/validation";
+import { loginSchema } from "@/lib/validation";
 
 export async function POST(request: Request) {
-  let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    const { email, password } = await parseBody(request, loginSchema);
+
+    const limitKey = `login:${email}`;
+    const lock = getLockStatus(limitKey);
+    if (lock.locked) {
+      const minutes = Math.max(1, Math.ceil(lock.retryAfterSeconds / 60));
+      throw new ApiError(
+        429,
+        `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`
+      );
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    const passwordOk = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
+
+    if (!user || !passwordOk) {
+      recordFailure(limitKey); // counted for unknown emails too, so lockouts reveal nothing
+      throw new ApiError(401, "Invalid email or password");
+    }
+
+    clearFailures(limitKey);
+    await createSession(user.id);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return errorResponse(e);
   }
-
-  const parsed = loginSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Please fix the errors below", fields: fieldErrors(parsed.error) },
-      { status: 400 }
-    );
-  }
-  const { email, password } = parsed.data;
-
-  const user = await prisma.user.findUnique({ where: { email } });
-  const passwordOk = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
-
-  if (!user || !passwordOk) {
-    return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
-  }
-
-  await createSession(user.id);
-  return NextResponse.json({ ok: true });
 }

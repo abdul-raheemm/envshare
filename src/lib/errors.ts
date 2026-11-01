@@ -18,6 +18,15 @@ export function isUniqueViolation(e: unknown): boolean {
   return typeof e === "object" && e !== null && "code" in e && e.code === "P2002";
 }
 
+// Logs only WHAT kind of error happened, never its message or the data involved
+function safeErrorSummary(e: unknown): string {
+  if (e instanceof Error) {
+    const code = "code" in e && typeof e.code === "string" ? ` ${e.code}` : "";
+    return `${e.name}${code}`;
+  }
+  return "Unknown error";
+}
+
 // Turns any thrown error into the standard { error, fields? } response
 export function errorResponse(e: unknown) {
   if (e instanceof ApiError) {
@@ -26,7 +35,7 @@ export function errorResponse(e: unknown) {
       { status: e.status }
     );
   }
-  console.error("Unhandled API error", e);
+  console.error("Unhandled API error:", safeErrorSummary(e));
   return NextResponse.json(
     { error: "Something went wrong. Please try again." },
     { status: 500 }
@@ -42,6 +51,7 @@ export async function parseBody<S extends z.ZodType>(
   if (!contentType.toLowerCase().includes("application/json")) {
     throw new ApiError(415, "Unsupported content type");
   }
+
   let body: unknown;
   try {
     body = await request.json();
