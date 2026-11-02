@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Switch } from "@/components/ui/Switch";
 import { Textarea } from "@/components/ui/Textarea";
 
 export function AddVariableForm({ environmentId }: { environmentId: string }) {
   const router = useRouter();
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  const [isSensitive, setIsSensitive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -25,7 +27,7 @@ export function AddVariableForm({ environmentId }: { environmentId: string }) {
       const res = await fetch(`/api/environments/${environmentId}/variables`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, value }),
+        body: JSON.stringify({ key, value, isSensitive }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 401) {
@@ -39,6 +41,7 @@ export function AddVariableForm({ environmentId }: { environmentId: string }) {
       }
       setKey("");
       setValue("");
+      setIsSensitive(false);
       router.refresh();
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
@@ -76,6 +79,14 @@ export function AddVariableForm({ environmentId }: { environmentId: string }) {
             Add variable
           </Button>
         </div>
+      </div>
+      <div className="space-y-1">
+        <Switch label="Sensitive" checked={isSensitive} onChange={setIsSensitive} />
+        <p className="text-sm text-muted">
+          {isSensitive
+            ? "Encrypted before saving, and masked after you add it."
+            : "Stored as plain text. Turn this on for passwords and tokens."}
+        </p>
       </div>
     </form>
   );

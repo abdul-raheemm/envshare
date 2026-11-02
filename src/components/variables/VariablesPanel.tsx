@@ -12,9 +12,9 @@ export function VariablesPanel({
 }) {
   return (
     <div className="space-y-4">
-      {/* Temporary: remove this banner when encryption is added in Phase 2 */}
       <Alert variant="info">
-        Values are stored as plain text for now. Do not enter real secrets yet.
+        Standard values are stored as plain text. Turn on Sensitive for passwords and tokens:
+        they are encrypted and masked.
       </Alert>
 
       {variables.length === 0 ? (
@@ -27,6 +27,7 @@ export function VariablesPanel({
             <thead>
               <tr className="border-b border-border text-xs font-medium uppercase text-muted">
                 <th className="pb-2 pr-4">Key</th>
+                <th className="pb-2 pr-4">Type</th>
                 <th className="pb-2 pr-4">Value</th>
                 <th className="pb-2 pr-4">Updated by</th>
                 <th className="pb-2 text-right">Actions</th>

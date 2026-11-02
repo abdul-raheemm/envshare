@@ -3,18 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Alert } from "@/components/ui/Alert";
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
+import { Switch } from "@/components/ui/Switch";
 import { Textarea } from "@/components/ui/Textarea";
+import type { VariableDTO } from "@/lib/variableDto";
 
-export type VariableItem = {
-  id: string;
-  key: string;
-  value: string;
-  version: number;
-  updatedByName: string;
-};
+export type VariableItem = VariableDTO;
 
 const NETWORK_ERROR = "Could not reach the server. Check your connection and try again.";
 
@@ -22,40 +19,57 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [draftKey, setDraftKey] = useState(variable.key);
-  const [draftValue, setDraftValue] = useState(variable.value);
+  // Sensitive rows never receive their real value, so their draft starts blank
+  const [draftValue, setDraftValue] = useState(variable.isSensitive ? "" : variable.value);
+  const [draftIsSensitive, setDraftIsSensitive] = useState(variable.isSensitive);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [confirmingDowngrade, setConfirmingDowngrade] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   function startEdit() {
     setDraftKey(variable.key);
-    setDraftValue(variable.value);
+    setDraftValue(variable.isSensitive ? "" : variable.value);
+    setDraftIsSensitive(variable.isSensitive);
     setError(null);
     setFields({});
     setEditing(true);
   }
 
   function cancelEdit() {
+    setDraftValue(""); // don't keep a typed secret in memory
     setError(null);
     setFields({});
     setEditing(false);
   }
 
-  async function handleSave() {
+  function handleSave() {
+    // Sensitive -> Standard stores the value unencrypted: ask first
+    if (variable.isSensitive && !draftIsSensitive) {
+      setConfirmingDowngrade(true);
+      return;
+    }
+    void doSave();
+  }
+
+  async function doSave() {
     setSaving(true);
     setError(null);
     setFields({});
     try {
+      // For a sensitive row, a blank field means "keep the current value"
+      const sendValue = !variable.isSensitive || draftValue !== "";
       const res = await fetch(`/api/variables/${variable.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           key: draftKey,
-          value: draftValue,
+          ...(sendValue ? { value: draftValue } : {}),
+          isSensitive: draftIsSensitive,
           version: variable.version,
         }),
       });
@@ -72,6 +86,7 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
         return;
       }
       setEditing(false);
+      setDraftValue("");
       router.refresh();
     } catch {
       setError(NETWORK_ERROR);
@@ -133,6 +148,20 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
         )}
       </td>
       <td className="py-3 pr-4">
+        {editing ? (
+          <Switch
+            label="Sensitive"
+            checked={draftIsSensitive}
+            onChange={setDraftIsSensitive}
+            disabled={saving}
+          />
+        ) : variable.isSensitive ? (
+          <Badge variant="warning">Sensitive</Badge>
+        ) : (
+          <Badge>Standard</Badge>
+        )}
+      </td>
+      <td className="py-3 pr-4">
         {error && (
           <div className="mb-2">
             <Alert variant="error">{error}</Alert>
@@ -144,10 +173,14 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
             hideLabel
             rows={2}
             className="font-mono"
+            placeholder={variable.isSensitive ? "Leave blank to keep the current value" : undefined}
+            autoComplete="off"
             value={draftValue}
             onChange={(e) => setDraftValue(e.target.value)}
             error={fields.value}
           />
+        ) : variable.masked ? (
+          <span className="font-mono text-sm text-gray-500">{variable.value}</span>
         ) : variable.value === "" ? (
           <span className="text-sm italic text-muted">(empty)</span>
         ) : (
@@ -170,9 +203,12 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
             </>
           ) : (
             <>
-              <Button size="sm" variant="secondary" onClick={handleCopy}>
-                {copied ? "Copied!" : "Copy"}
-              </Button>
+              {/* Temporary: sensitive Copy arrives with the reveal endpoint in step 2.5 */}
+              {!variable.masked && (
+                <Button size="sm" variant="secondary" onClick={handleCopy}>
+                  {copied ? "Copied!" : "Copy"}
+                </Button>
+              )}
               <Button size="sm" variant="secondary" onClick={startEdit}>
                 Edit
               </Button>
@@ -189,6 +225,32 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
             </>
           )}
         </div>
+
+        <Modal
+          open={confirmingDowngrade}
+          title="Store this value unencrypted?"
+          onClose={() => setConfirmingDowngrade(false)}
+        >
+          <p className="text-sm text-muted">
+            <span className="font-mono font-medium text-gray-900">{variable.key}</span> will
+            become a Standard variable. Its value will be saved as plain text and shown to
+            everyone with access to this project.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmingDowngrade(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmingDowngrade(false);
+                void doSave();
+              }}
+            >
+              Make standard
+            </Button>
+          </div>
+        </Modal>
+
         <Modal
           open={confirmingDelete}
           title="Delete variable?"
