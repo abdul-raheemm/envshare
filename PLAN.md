@@ -286,39 +286,209 @@ Before starting Phase 2, record here:
 
 ---
 
-# PHASE 2: Security and History _(outline; expand when Phase 1 is done)_
+# PHASE 2: Security and History
 
-**Goal:** The secure core. Sensitive values are encrypted, masked, revealed only when authorized, and every change is logged without leaking secrets.
+**Goal:** The secure core. Sensitive values are encrypted, masked, revealed only to authorized members (with an audit trail), and every change is logged without leaking secrets.
 
-**Covers brief sections:** 2C (Plain vs Sensitive), 2E (history), the security requirements in section 3.
+**Covers brief sections:** 2C (Plain vs Sensitive), 2E (History and Version Tracking), and the security and usability requirements in section 3.
 
-### Scope
-1. **Encryption helper:** AES-256-GCM with a random IV per value; key from an environment variable (`ENCRYPTION_KEY`, 32 bytes), never stored in the DB or the repo.
-2. **Sensitive toggle:** create/edit with a type; switching type encrypts or decrypts the stored value.
-3. **Masking:** list endpoints return `••••••••` for sensitive values and never send plaintext.
-4. **Reveal and Copy:** a separate authorized endpoint; consider password re-entry and logging each reveal.
-5. **History:** a `HistoryEntry` table written **in the same transaction** as every add, edit, delete, and type change. Stores key name (not a foreign key), old/new values (encrypted when sensitive), who, when, and a `batchId`.
-6. **Timeline UI:** per-environment history with masked sensitive values and a per-row reveal.
+> ⚠️ **Variables created during Phase 1 are stored as plain text. Delete any real secrets you entered while testing (and rotate them if they were real).**
 
-### Decisions you'll need to make
-- What happens to **old history entries** when a variable switches from Standard to Sensitive? (Recommended: re-encrypt them.)
-- Which reveal rules apply: any member, or owner only? Is every reveal audited?
-- One history row per key, or one snapshot per save? (`batchId` supports both.)
+## Phase 2 Decisions (locked)
 
-### Traps to watch
-- History storing plaintext secrets.
-- Plaintext returned by any API route just because the UI hides it.
-- Secrets in server logs or error messages.
-- Reusing an IV (always generate a new one for each encryption).
+| # | Decision | Choice |
+|---|---|---|
+| 1 | Who can reveal a sensitive value? | Any project member. Every reveal is audited (who, which key, when, never the value). |
+| 2 | Password re-entry before reveal? | No. Stretch goal only. |
+| 3 | Where do reveal audits go? | A separate `RevealLog` table, so the timeline stays about changes, not views. |
+| 4 | History granularity | One `HistoryEntry` row per key per change, grouped by `batchId`. |
+| 5 | Key rename | One `UPDATE` row that also records `oldKey`. |
+| 6 | Standard → Sensitive | Re-encrypt every earlier plain-text history value for that key, in the same transaction. |
+| 7 | Sensitive → Standard | Old history stays encrypted (never decrypt history in bulk). |
+| 8 | Type-change rows | A `TYPE_CHANGE` row stores no values, only the old and new type. |
+| 9 | History is append-only | No API edits or deletes history. The only internal rewrite is the re-encryption in decision 6. |
 
-### Definition of Done (draft)
+## Assumptions to add to your README
+5. Any project member can reveal sensitive values; every reveal is logged with user, key and time (never the value).
+6. History has one row per key per change, grouped into batches. It survives variable deletion.
+7. A rename is logged as an UPDATE with the old key recorded.
+8. When a variable becomes Sensitive, its earlier plain-text history values are encrypted. Switching back to Standard does not decrypt history.
+9. Losing `ENCRYPTION_KEY` makes all encrypted values unrecoverable. Key rotation is out of scope.
+
+---
+
+## Step 2.0: Prerequisites (do these before any code)
+- [ ] Phase 1 Definition of Done is fully ticked, the working tree is clean and committed, and the Phase 1 handoff notes are filled in.
+- [ ] Docker Postgres is running and `npm run dev` works.
+- [ ] Delete or rotate any real secrets typed into the app during Phase 1 (they are plain text in the DB).
+- [ ] Generate `ENCRYPTION_KEY` (64 hex chars = 32 bytes), separate from `JWT_SECRET`:
+      `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+- [ ] Add `ENCRYPTION_KEY` to `.env` (real value) and `.env.example` (placeholder only). Confirm `.env` is still git-ignored.
+- [ ] Install and configure Vitest (`npm i -D vitest`), add an `npm test` script, and make the `@/` path alias resolve in the Vitest config. Run one trivial test to confirm it works.
+- [ ] List every Phase 1 route and data function that returns or accepts variable values (create, list, patch, delete, seed). These all get touched in 2.3 and 2.4. Write the list in the handoff notes.
+- [ ] Add a new shared UI components list to plan: `Badge` (Standard / Sensitive / action labels), `Switch` or checkbox toggle, `Toast` (for "Copied"). Rule from Phase 1 still applies: no ad-hoc styles.
+
+## Step 2.1: Encryption helper (`src/lib/crypto.ts`)
+- [ ] `encrypt(plaintext)` returns `{ value, iv, authTag }` (all base64). Algorithm AES-256-GCM, 12-byte random IV generated fresh on every call, 16-byte auth tag.
+- [ ] `decrypt({ value, iv, authTag })` returns the plaintext string.
+- [ ] Load the key lazily from `ENCRYPTION_KEY`; validate it is exactly 32 bytes (64 hex chars). If missing or invalid, throw a clear but value-free error (e.g. "ENCRYPTION_KEY is missing or invalid").
+- [ ] All crypto errors are generic ("Could not decrypt this value"). Never include plaintext, ciphertext, IV or key in any message.
+- [ ] Vitest tests: round-trip works; same plaintext encrypted twice gives different ciphertext and IV; wrong key fails; a tampered ciphertext or auth tag fails; empty string and unicode round-trip; missing and short key are rejected.
+- [ ] Mask constant (`MASK = "••••••••"`) exported from one shared place.
+
+## Step 2.2: Schema migration
+Add these models and enums (new tables only, no existing data touched), plus back-relations on `User` and `Environment`:
+
+```prisma
+enum HistoryAction { CREATE UPDATE DELETE TYPE_CHANGE }
+enum RevealSource  { VARIABLE HISTORY }
+
+model HistoryEntry {
+  id             String        @id @default(cuid())
+  environmentId  String
+  batchId        String
+  action         HistoryAction
+  key            String        // string, NOT a foreign key (survives deletion)
+  oldKey         String?       // only set on renames
+  oldValue       String?       // set only when the value changed / was deleted
+  oldIv          String?       // non-null means oldValue is encrypted
+  oldAuthTag     String?
+  newValue       String?       // set only when the value changed / was created
+  newIv          String?       // non-null means newValue is encrypted
+  newAuthTag     String?
+  oldIsSensitive Boolean?      // type snapshots, for display
+  newIsSensitive Boolean?
+  changedById    String
+  changedAt      DateTime      @default(now())
+  environment    Environment   @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  changedBy      User          @relation(fields: [changedById], references: [id])
+  @@index([environmentId, changedAt])
+  @@index([environmentId, key])
+  @@index([batchId])
+}
+
+model RevealLog {
+  id            String       @id @default(cuid())
+  environmentId String
+  key           String       // string, not a foreign key
+  source        RevealSource
+  userId        String
+  revealedAt    DateTime     @default(now())
+  environment   Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  user          User         @relation(fields: [userId], references: [id])
+  @@index([environmentId, revealedAt])
+}
+```
+
+- [ ] Run `npx prisma migrate dev --name add_history_and_reveal_log`, then `npx prisma generate`.
+- [ ] Rule: a history value is **encrypted if and only if its `iv` is non-null**. This is the single source of truth for masking.
+- [ ] Note the deviation from the old draft (`wasSensitive` became `oldIsSensitive` / `newIsSensitive`, plus `oldKey`, and a separate `RevealLog`) in the handoff notes.
+
+## Step 2.3: Service layer with transactional history (plain variables first)
+Build history before encryption, so it is never retrofitted around secrets.
+- [ ] Move variable writes into service functions (in `src/lib`): `createVariable`, `updateVariable`, `deleteVariable`. Routes become thin wrappers. Each service function calls `requireProjectAccess` (loading variable → environment → project) as in Phase 1.
+- [ ] Internal `applyChange(tx, ...)` does the variable write plus the history write(s) inside one `prisma.$transaction`. It accepts an optional `batchId` (default: a new id). **Phase 3 import will reuse this with one shared `batchId`.**
+- [ ] CREATE row: `newValue` set. DELETE row: `oldValue` set. UPDATE row: `oldValue` and `newValue` set only if the value changed; a rename-only UPDATE stores `oldKey` and no values.
+- [ ] If the transaction fails, neither the variable change nor the history row is saved. Test this by forcing a failure.
+- [ ] Keep optimistic locking (`version`) working exactly as in Phase 1.
+- [ ] Verify: add, edit, rename, delete each produce the right history rows (check in Prisma Studio), and deleting a variable keeps its history.
+
+## Step 2.4: Sensitive variables, masking and type toggle
+**Write path**
+- [ ] zod: add `isSensitive` (boolean, default false) to create and patch bodies. For sensitive rows, `value` is optional on patch (**omitted = unchanged**).
+- [ ] Create sensitive: encrypt value, store ciphertext in `value` plus `iv` and `authTag`; `isSensitive = true`.
+- [ ] Edit sensitive value: encrypt the new value with a fresh IV. To decide whether the value actually changed, decrypt the old one server-side and compare.
+- [ ] **Reject a patch whose value equals the mask string** for a sensitive row (prevents saving "••••••••" over a real secret).
+- [ ] History rows copy the ciphertext, IV and auth tag from the variable columns (no re-encryption, no IV reuse issues). Standard values go into history as plain text with `iv = null`.
+
+**Type toggle (both directions, logged as `TYPE_CHANGE`)**
+- [ ] Standard → Sensitive: encrypt the stored value, set `isSensitive`, bump `version`. Write a `TYPE_CHANGE` row with no values.
+- [ ] Sensitive → Standard: decrypt, store plain, clear `iv` and `authTag`, bump `version`. Write a `TYPE_CHANGE` row with no values.
+- [ ] If type and value change in the same request, write an `UPDATE` row and a `TYPE_CHANGE` row in the same batch.
+- [ ] **History re-encryption (decision 6):** after a variable becomes Sensitive (also on creating a sensitive variable), find all history rows in that environment whose `key` matches the current key **or any earlier key in its rename chain** (walk the `oldKey` links), and encrypt any `oldValue` / `newValue` that is still plain (`iv = null`). Do it inside the same transaction.
+- [ ] Vitest or manual test: create Standard → edit twice → rename → delete? (no) → toggle Sensitive → query `HistoryEntry`: no plaintext remains for that key.
+
+**Masking (every exit path)**
+- [ ] One serializer `toVariableDTO(variable)` is the **only** way a variable leaves the server. Returns `{ id, environmentId, key, isSensitive, value, masked, version, updatedAt, updatedBy }` where sensitive rows get `value = MASK` and `masked = true`. Never return ciphertext, `iv` or `authTag`.
+- [ ] Apply it to list, create, patch and any other route that returns variables. The list endpoint never decrypts anything.
+- [ ] Test: response JSON for a sensitive variable contains neither the plaintext nor the ciphertext.
+
+**UI**
+- [ ] "Sensitive" switch on the add form and the edit form. Type badge on each row.
+- [ ] Sensitive rows show `••••••••`. Editing a sensitive row shows an empty value field ("Leave blank to keep the current value").
+- [ ] Switching Sensitive → Standard opens a confirmation `Modal`: "This value will be stored unencrypted."
+
+## Step 2.5: Reveal and Copy
+- [ ] `POST /api/variables/:id/reveal` (POST, not GET). Checks project access (404 if none), requires the variable to be sensitive, decrypts, and returns `{ value }` with `Cache-Control: no-store`.
+- [ ] **Fail closed:** write the `RevealLog` row (source `VARIABLE`) before returning the value. If logging fails, return an error and no value.
+- [ ] Decryption failure returns a generic error ("Could not decrypt this value") and logs only the error type.
+- [ ] UI: an eye/Reveal button on sensitive rows. The revealed value is held in component state only (not in URLs, not in localStorage), and **auto-hides after about 15 seconds**.
+- [ ] UI: the Copy button on a sensitive row calls reveal, copies to the clipboard without displaying it, and shows a "Copied" toast. Standard rows copy directly as before.
+- [ ] Optional: simple per-user rate limit on reveal (in memory, like the login limit).
+
+## Step 2.6: History read API and timeline UI
+- [ ] `GET /api/environments/:id/history?cursor=&limit=` (membership checked, 404 otherwise). Newest first, cursor pagination (default 50). Each item: `id, batchId, action, key, oldKey, oldIsSensitive, newIsSensitive, changedAt, changedBy { name }, old: { masked, value }, new: { masked, value }`. If a value is encrypted (`iv` non-null) return `masked: true` and `value = MASK`; otherwise the plain value. Never return `iv` / `authTag` / ciphertext.
+- [ ] `POST /api/history/:id/reveal` with body `{ which: "old" | "new" }`. Load entry → environment → project → check access. Only works for encrypted values. Writes `RevealLog` (source `HISTORY`) before returning, `no-store`.
+- [ ] No endpoint exists that edits or deletes history.
+- [ ] UI: an obvious **History** button/tab per environment, leading to a timeline page.
+- [ ] Timeline groups entries by `batchId`: header with user, date/time and change count. Each row shows an action `Badge` (text + color), the key (with "renamed from X" when `oldKey` is set), and old → new values. Encrypted values show the mask with a per-row, per-side reveal button (auto-hide like 2.5). `TYPE_CHANGE` rows show "Standard → Sensitive" and no values.
+- [ ] Empty state ("No changes yet"), loading state, and a "Load more" button.
+
+## Step 2.7: Security sweep (do not skip)
+- [ ] **DB inspection:** in Prisma Studio or psql, `Variable` and `HistoryEntry` show ciphertext (base64) for sensitive values. Dump the DB and search it for a known test secret: zero matches.
+- [ ] **Network tab:** create, list, patch, history list and reveal responses. A masked value never appears in plaintext, except in the reveal response itself. Check the reveal response has `Cache-Control: no-store`.
+- [ ] **Logs:** search the dev server output for the test secret: zero matches. Confirm validation errors never echo submitted values.
+- [ ] **Non-member attack:** as User B, call history list, history reveal and variable reveal on User A's IDs. All must return 404.
+- [ ] **Tamper test:** change one character of a ciphertext (or auth tag) in the DB. Reveal returns the generic error, nothing leaks, and the list endpoint still works.
+- [ ] **Wrong key test:** restart with a different `ENCRYPTION_KEY`. The app does not crash, lists still load, reveals fail gracefully. Restore the real key afterwards.
+- [ ] **IV test:** encrypt the same value twice; ciphertext and IV differ.
+- [ ] **Toggle test:** Standard → Sensitive → Standard; both are logged, and old history is still encrypted afterwards.
+- [ ] **Re-encryption trap test:** a key edited several times and renamed while Standard has no plaintext history left once it becomes Sensitive.
+- [ ] **Mask-overwrite test:** try to save the mask string over a sensitive value: rejected. Editing with the value field blank leaves the secret unchanged.
+- [ ] **Stale edit:** two tabs editing the same variable still produce the conflict message.
+- [ ] **Deletion test:** deleting a variable keeps its history rows.
+- [ ] **Audit test:** every reveal (variable and history) creates a `RevealLog` row with the right user and key, and never the value.
+
+## Step 2.8: Seed, README, handoff
+- [ ] Update the seed script to create a few sensitive variables and some history (use the service functions or the crypto helper, never raw plain text in sensitive rows).
+- [ ] README: add `ENCRYPTION_KEY` to the environment table with the generation command and the key-loss warning, add assumptions 5-9, update security notes (encryption, masking, reveal audit, append-only history), and add the new `npm test` script.
+- [ ] Confirm `.env.example` has the placeholder and `.env` is untracked.
+- [ ] Update the Status Tracker, tick this checklist, and fill in the handoff notes below.
+- [ ] Commit.
+
+---
+
+## Traps to watch
+| Trap | What to do |
+|---|---|
+| Plaintext returned by an API route because the UI hides it | One `toVariableDTO` for all exits; test the JSON |
+| Old Copy button still sends the raw value | Sensitive Copy goes through reveal |
+| Mask string saved as the value | Omit value to keep; reject the mask string |
+| History storing plaintext secrets | Copy ciphertext into history; re-encrypt on Standard → Sensitive, including renamed keys |
+| Reusing an IV | `encrypt()` always generates a new IV; never reuse one for a new value |
+| Reveal via `GET` or cached response | `POST` + `no-store` |
+| Reveal succeeds but audit fails | Log first; fail closed |
+| Secrets in logs or error messages | Log error types only; never interpolate values |
+| History and variable out of sync | One transaction for both |
+| Losing `ENCRYPTION_KEY` | Separate from `JWT_SECRET`, never committed, documented |
+
+## Phase 2: Definition of Done
 - [ ] DB inspection shows ciphertext for sensitive values in **both** `Variable` and `HistoryEntry`.
-- [ ] Network tab never shows plaintext for masked values.
-- [ ] Toggling type works in both directions and is logged.
-- [ ] History survives variable deletion.
+- [ ] The network tab never shows plaintext for masked values (only the explicit reveal response).
+- [ ] Type toggle works in both directions and is logged; old history is protected on Standard → Sensitive.
+- [ ] Reveal and Copy work for sensitive values, auto-hide works, and every reveal is audited.
+- [ ] History is written in the same transaction as every add, edit, rename, delete and type change, and survives variable deletion.
+- [ ] Timeline shows who, what and when, grouped by batch, with masked sensitive values and a per-row reveal.
+- [ ] Non-members cannot reach any new endpoint (404).
+- [ ] Crypto unit tests pass; the security sweep checklist is fully ticked.
+- [ ] README and seed are updated.
 
-_Detailed step-by-step: to be generated after Phase 1._
-
+## Phase 2 → Phase 3 handoff notes
+Before starting Phase 3, record here:
+- Final file layout / route names (service layer, crypto, history routes, timeline page): _(fill in)_
+- Any deviations from the schema above: _(fill in)_
+- Known issues carried over: _(fill in)_
+- Reusable pieces Phase 3 will call: `applyChange(tx, ..., batchId)`, `encrypt` / `decrypt`, `toVariableDTO`, and a server-side helper to load an environment's variables **decrypted for diffing only** (never returned to the client).
 ---
 
 # PHASE 3: Smart Import and Polish _(outline; expand when Phase 2 is done)_
