@@ -8,11 +8,9 @@
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1. Foundation | Auth, projects, membership, environments, plain variable CRUD | 🔲 Not started |
+| 1. Foundation | Auth, projects, membership, environments, plain variable CRUD | ✅ Done |
 | 2. Security and History | Sensitive variables, encryption, masking/reveal, change history | 🔲 Not started |
 | 3. Smart Import and Polish | .env parser, New/Update/Unchanged preview, bulk import, polish | 🔲 Not started |
-
----
 
 ## Project-wide Decisions (apply to all phases)
 
@@ -37,7 +35,7 @@
 3. Sessions use a signed JWT in an httpOnly, SameSite=Lax cookie that lasts 7 days (Secure flag in production). The user is re-read from the database on every request, so a deleted user's old cookie stops working.
 4. Login gives the same message ("Invalid email or password") for an unknown email and a wrong password, and takes about the same time for both.
 5. Signup does tell the visitor when an email is already registered, because the brief asks for that kind of clear message. This is a known trade-off.
-6. Not in this version: password reset, email verification, and rate limiting on login (rate limiting is planned for the Step 1.9 pass).
+6. Not in this version: password reset and email verification. (Login rate limiting is covered in assumption 33.)
 
 ### Projects and membership
 7. The project owner is also stored as a `ProjectMember` row, so every access check is one query.
@@ -65,7 +63,7 @@
 25. Importing a pasted `.env` never deletes keys missing from the pasted text (Phase 3).
 
 ### Architecture
-26. Stack: Next.js 16 (App Router), Prisma 7.10.0 (pinned exactly), PostgreSQL 16 in Docker for development, Tailwind CSS 4 as the only styling system, zod for validation.
+26. Stack: Next.js 16 (App Router), Prisma 7.10.1 (pinned exactly), PostgreSQL 16 in Docker for development, Tailwind CSS 4 as the only styling system, zod for validation.
 27. Pages read data through server components that call functions in `src/lib/`; changes go through API routes. Every data function takes the user's ID and checks access itself.
 28. The login check in the page layout is a convenience only. The real protection is the access check inside every data function and API route.
 29. All API errors use one shape: `{ error: "message", fields?: { fieldName: "message" } }`.
@@ -114,6 +112,7 @@ model User {
   createdAt    DateTime @default(now())
   ownedProjects Project[]
   memberships   ProjectMember[]
+  updatedVariables Variable[]
 }
 
 model Project {
@@ -134,6 +133,7 @@ model ProjectMember {
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id])
   @@unique([projectId, userId])
+  @@index([userId]) 
 }
 
 model Environment {
@@ -160,7 +160,10 @@ model Variable {
   updatedAt     DateTime @updatedAt
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   @@unique([environmentId, key])
+  updatedBy User @relation(fields: [updatedById], references: [id])
 }
+generator client { provider = "prisma-client", output = "../src/generated/prisma" }
+datasource db { provider = "postgresql" }
 
 // Added in Phase 2 (design it now, build it then):
 // model HistoryEntry {
@@ -183,76 +186,103 @@ model Variable {
 > ⚠️ **During Phase 1, values are stored as plain text. Do not enter real secrets while testing.**
 
 ## Step 1.1: Repo and tooling
-- [✅ ] Create the Next.js app (TypeScript, Tailwind, App Router) and init git.
-- [✅ ] Install: `prisma @prisma/client bcryptjs jose zod` (plus `vitest` for later).
-- [✅ ] Create `.env` and `.env.example` with `DATABASE_URL` and `JWT_SECRET`. Add `.env` to `.gitignore` (an env manager project that leaks its own `.env` looks bad).
-- [✅ ] Set up a local Postgres database (Docker or a hosted free tier).
+- [x] Create the Next.js app (TypeScript, Tailwind, App Router) and init git.
+- [x] Install: `prisma @prisma/client bcryptjs jose zod` (plus `vitest` for later).installed in the steps that use them; vitest is deferred to Phase 3
+- [x] Create `.env` and `.env.example` with `DATABASE_URL` and `JWT_SECRET`. Add `.env` to `.gitignore` (an env manager project that leaks its own `.env` looks bad).
+- [x] Set up a local Postgres database (Docker or a hosted free tier).
 
 ## Step 1.2: Database schema
-- [✅ ] Paste the schema above into `prisma/schema.prisma`, run `prisma migrate dev`.
-- [✅ ] Create a `lib/db.ts` that exports a single Prisma client instance.
-- [✅ ] Write a small seed script (2 users, 1 project, 3 environments) for demos.
+- [x] Paste the schema above into `prisma/schema.prisma`, run `prisma migrate dev`. note: Prisma 7 also needs the generator and datasource blocks and a prisma.config.ts; see the real prisma/schema.prisma
+- [x] Create a `lib/db.ts` that exports a single Prisma client instance.
+- [x] Write a small seed script (2 users, 1 project, 3 environments) for demos.
 
 ## Step 1.3: UI foundation (do this early so everything stays uniform)
-- [✅ ] Define Tailwind theme colors (primary, danger, muted) in the config.
-- [✅ ] Build reusable components: `Button` (primary/secondary/danger), `Input` (with label and error text), `Card`, `Modal`, `Alert`, `PageHeader`.
-- [✅ ] Build one shared layout with a navbar (app name, user name, logout).
-- [ ✅] Rule: **no page may use ad-hoc button or input styles.** Use only these components.
+- [x] Define Tailwind theme colors in globals.css using @theme (Tailwind 4).
+- [x] Build reusable components: `Button` (primary/secondary/danger), `Input` (with label and error text), `Card`, `Modal`, `Alert`, `PageHeader`, `Textarea` and `Badge`.
+- [x] Build one shared layout with a navbar (app name, user name, logout),built in 1.4 together with the login check
+- [x] Rule: **no page may use ad-hoc button or input styles.** Use only these components.
 
 ## Step 1.4: Authentication
-- [ ✅] `POST /api/auth/signup`: validate email format and password length (8+), reject duplicates ("An account with this email already exists"), hash with bcrypt, store.
-- [✅ ] `POST /api/auth/login`: verify the hash, set the JWT cookie. Use the **same generic error** for wrong email and wrong password ("Invalid email or password").
-- [✅ ] `POST /api/auth/logout`: clear the cookie.
-- [✅ ] Helper `getCurrentUser(request)` that returns the user or null.
-- [✅ ] Middleware or helper that redirects unauthenticated users to `/login`.
-- [✅ ] Pages: `/signup`, `/login`.
+- [x] `POST /api/auth/signup`: validate email format and password length (8+), reject duplicates ("An account with this email already exists"), hash with bcrypt, store.
+- [x] `POST /api/auth/login`: verify the hash, set the JWT cookie. Use the **same generic error** for wrong email and wrong password ("Invalid email or password").
+- [x] `POST /api/auth/logout`: clear the cookie.
+- [x] Helper `getCurrentUser(request)` that returns the user or null.
+- [x] Middleware or helper that redirects unauthenticated users to `/login`.
+- [x] Pages: `/signup`, `/login`.
 
 ## Step 1.5: Projects and membership
-- [ ✅] Helper `requireProjectAccess(userId, projectId)`: looks up `ProjectMember`; throws 403/404 if none. **Every project, environment, and variable route must call this.**
-- [✅ ] `POST /api/projects`: create the project and, in the same transaction, insert the owner as a `ProjectMember`.
-- [✅ ] `GET /api/projects`: list projects the current user is a member of.
-- [ ✅] `POST /api/projects/:id/members`: owner only. Takes an email; errors: "No registered user with this email", "User is already a member".
-- [ ✅] `GET /api/projects/:id/members`: list members.
-- [ ✅] Pages: `/dashboard` (project list + create form), `/projects/[id]` (overview + members panel; invite form visible to owner only).
+- [x] Helper `requireProjectAccess(userId, projectId)`: looks up `ProjectMember`; throws 403/404 if none. **Every project, environment, and variable route must call this.**
+- [x] `POST /api/projects`: create the project and, in the same transaction, insert the owner as a `ProjectMember`.
+- [x] `GET /api/projects`: list projects the current user is a member of.
+- [x] `POST /api/projects/:id/members`: owner only. Takes an email; errors: "No registered user with this email", "User is already a member".
+- [x] `GET /api/projects/:id/members`: list members.
+- [x] Pages: `/dashboard` (project list + create form), `/projects/[id]` (overview + members panel; invite form visible to owner only).(done as a server-side function, not an API route; see Deviations)
 
 ## Step 1.6: Environments
-- [✅] `POST /api/projects/:id/environments`: unique name per project ("This environment already exists").
-- [✅] `GET /api/projects/:id/environments`.
-- [✅] Optionally auto-create Development, Staging, Production when a project is created.
-- [✅] UI: environment tabs on the project page.
+- [x] `POST /api/projects/:id/environments`: unique name per project ("This environment already exists").
+- [x] `GET /api/projects/:id/environments`.
+- [x] Optionally auto-create Development, Staging, Production when a project is created.
+- [x] UI: environment tabs on the project page.
 
 ## Step 1.7: Variable CRUD (plain text)
-- [✅ ] `GET /api/environments/:id/variables`
-- [✅ ] `POST /api/environments/:id/variables`: validate key format (`^[A-Za-z_][A-Za-z0-9_]*$`), reject duplicate keys ("This key already exists"), set `updatedById`.
-- [ ✅] `PATCH /api/variables/:id`: edit key or value. Send the current `version`; if it doesn't match, return a conflict ("This variable was changed by someone else. Reload and try again") and increment the version on success.
-- [✅ ] `DELETE /api/variables/:id`: with a confirmation modal in the UI.
-- [✅ ] UI: table of key/value rows, "Add variable" form, inline edit, a clear **Copy** button on each value, delete button.
+- [x] `GET /api/environments/:id/variables`
+- [x] `POST /api/environments/:id/variables`: validate key format (`^[A-Za-z_][A-Za-z0-9_]*$`), reject duplicate keys ("This key already exists"), set `updatedById`.
+- [x] `PATCH /api/variables/:id`: edit key or value. Send the current `version`; if it doesn't match, return a conflict ("This variable was changed by someone else. Reload and try again") and increment the version on success.
+- [x] `DELETE /api/variables/:id`: with a confirmation modal in the UI.
+- [x] UI: table of key/value rows, "Add variable" form, inline edit, a clear **Copy** button on each value, delete button.
 
 ## Step 1.8: Authorization sweep (do not skip)
-- [ ] Walk through every route and confirm it checks membership. For variable routes, load the variable, then its environment, then its project, then check access.
-- [ ] Test manually: log in as User B and try to fetch User A's project, environment, and variable by ID. Every attempt must fail.
-- [ ] Return 404 (not 403) for resources the user can't access, so IDs aren't confirmed to exist.
+- [x] Walk through every route and confirm it checks membership. For variable routes, load the variable, then its environment, then its project, then check access.
+- [x] Test manually: log in as User B and try to fetch User A's project, environment, and variable by ID. Every attempt must fail.
+- [x] Return 404 (not 403) for resources the user can't access, so IDs aren't confirmed to exist.
 
 ## Step 1.9: Errors, validation, and usability pass
-- [ ] Use zod on every request body; return field-level messages.
-- [ ] Show server errors in an `Alert` or under the relevant input, never raw JSON.
-- [ ] Loading and empty states ("No projects yet. Create your first one").
-- [ ] Make sure nothing logs full request bodies (habit for Phase 2).
+- [x] Use zod on every request body; return field-level messages.
+- [x] Show server errors in an `Alert` or under the relevant input, never raw JSON.
+- [x] Loading and empty states ("No projects yet. Create your first one").
+- [x] Make sure nothing logs full request bodies (habit for Phase 2).
 
 ## Phase 1: Definition of Done
-- [ ] Two accounts can sign up and log in; passwords are bcrypt hashes in the DB (verify by looking at the table).
-- [ ] Owner creates a project and invites the second user by email; the second user sees it on their dashboard.
-- [ ] Both users can create environments and add, edit, delete, and copy variables.
-- [ ] A non-member cannot read or modify anything in that project (tested via URL/ID tampering).
-- [ ] Duplicate key, invalid email, unknown invitee, and stale-edit errors all show clear messages.
-- [ ] UI uses only the shared components; looks uniform on every page.
-- [ ] README has setup instructions and the assumptions listed above.
+- [x] Two accounts can sign up and log in; passwords are bcrypt hashes in the DB (verify by looking at the table).
+- [x] Owner creates a project and invites the second user by email; the second user sees it on their dashboard.
+- [x] Both users can create environments and add, edit, delete, and copy variables.
+- [x] A non-member cannot read or modify anything in that project (tested via URL/ID tampering).
+- [x] Duplicate key, invalid email, unknown invitee, and stale-edit errors all show clear messages.
+- [x] UI uses only the shared components; looks uniform on every page.
+- [x] README has setup instructions and the assumptions listed above.
 
 ## Phase 1 → Phase 2 handoff notes
 Before starting Phase 2, record here:
-- Final file layout / route names: _(fill in)_
-- Any deviations from the schema above: _(fill in)_
-- Known issues carried over: _(fill in)_
+
+**Final file layout / route names**
+- Pages: `/login`, `/signup`, `/dashboard`, `/projects/[projectId]?env=<environmentId>`
+- API: `POST /api/auth/{signup,login,logout}`, `POST /api/projects`,
+  `POST /api/projects/[projectId]/members`, `POST /api/projects/[projectId]/environments`,
+  `POST /api/environments/[environmentId]/variables`, `PATCH|DELETE /api/variables/[variableId]`
+- `src/lib`: `db.ts`, `password.ts`, `session.ts`, `validation.ts`, `errors.ts`, `access.ts`,
+  `projects.ts`, `environments.ts`, `variables.ts`, `rateLimit.ts`
+- `src/components`: `ui/` (Button, Input, Textarea, Card, Modal, Alert, Badge, PageHeader),
+  `auth/`, `projects/`, `variables/`, `Navbar.tsx`, `NotFoundCard.tsx`
+- Data is read in server components through `src/lib` functions; changes go through API routes.
+- All variable writes go through `src/lib/variables.ts` (add history logging there in Phase 2).
+- Generated Prisma client lives in `src/generated/prisma` (not committed; run `npx prisma generate`).
+- missing special pages: prisma/seed.ts, prisma.config.ts, docker-compose.yml, and the error.tsx, not-found.tsx and (app)/loading.tsx pages
+
+**Deviations from the schema in this plan**
+- Added a `Variable.updatedBy` relation to `User` (and `User.updatedVariables`).
+- Added an index on `ProjectMember.userId`.
+- `HistoryEntry` is not created yet.
+
+**Known issues / things Phase 2 must change**
+- Values are plain text and a temporary banner says so (remove it in `VariablesPanel.tsx`).
+- `listVariables` and `requireVariableAccess` return plaintext values: Phase 2 must mask server-side and stop selecting `value` where it is not needed.
+- The Copy button copies from the page's data: Phase 2 needs an authorized reveal endpoint instead.
+- Deleting a variable is permanent; history will keep a record in Phase 2.
+- The seed script stores plain values: update it for encryption.
+- `.env.example` needs `ENCRYPTION_KEY` (32 bytes) added; never commit the real key.
+- Login rate limiting is in memory (single server, resets on restart).
+- Production dependencies audit clean (Prisma upgraded to clear advisories in its tooling); remaining findings are in development-only tools.
+- No removing members, renaming or deleting projects or environments (not required by the brief).
 
 ---
 
