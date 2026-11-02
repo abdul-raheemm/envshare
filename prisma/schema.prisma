@@ -16,6 +16,8 @@ model User {
   ownedProjects    Project[]
   memberships      ProjectMember[]
   updatedVariables Variable[]
+  historyEntries   HistoryEntry[]
+  revealLogs       RevealLog[]
 }
 
 model Project {
@@ -41,12 +43,14 @@ model ProjectMember {
 }
 
 model Environment {
-  id        String     @id @default(cuid())
-  projectId String
-  name      String
-  createdAt DateTime   @default(now())
-  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  variables Variable[]
+  id         String         @id @default(cuid())
+  projectId  String
+  name       String
+  createdAt  DateTime       @default(now())
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  variables  Variable[]
+  history    HistoryEntry[]
+  revealLogs RevealLog[]
 
   @@unique([projectId, name])
 }
@@ -67,4 +71,54 @@ model Variable {
   updatedBy     User        @relation(fields: [updatedById], references: [id])
 
   @@unique([environmentId, key])
+}
+
+enum HistoryAction {
+  CREATE
+  UPDATE
+  DELETE
+  TYPE_CHANGE
+}
+
+enum RevealSource {
+  VARIABLE
+  HISTORY
+}
+
+model HistoryEntry {
+  id             String        @id @default(cuid())
+  environmentId  String
+  batchId        String
+  action         HistoryAction
+  key            String // a plain string, NOT a foreign key: survives variable deletion
+  oldKey         String? // only set on renames
+  oldValue       String? // set only when the value changed or was deleted
+  oldIv          String? // non-null means oldValue is encrypted
+  oldAuthTag     String?
+  newValue       String? // set only when the value changed or was created
+  newIv          String? // non-null means newValue is encrypted
+  newAuthTag     String?
+  oldIsSensitive Boolean? // type snapshots, for display
+  newIsSensitive Boolean?
+  changedById    String
+  changedAt      DateTime      @default(now())
+  environment    Environment   @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  changedBy      User          @relation(fields: [changedById], references: [id])
+
+  @@index([environmentId, changedAt])
+  @@index([environmentId, key])
+  @@index([batchId])
+}
+
+model RevealLog {
+  id            String       @id @default(cuid())
+  environmentId String
+  key           String // a plain string, not a foreign key
+  source        RevealSource
+  userId        String
+  revealedAt    DateTime     @default(now())
+  environment   Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  user          User         @relation(fields: [userId], references: [id])
+
+  @@index([environmentId, revealedAt])
 }
