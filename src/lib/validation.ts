@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MASK } from "@/lib/mask";
 
 const emailField = z
   .string()
@@ -63,19 +64,25 @@ const variableKey = z
     "Key must start with a letter or underscore and contain only letters, numbers and underscores"
   );
 
-const variableValue = z.string().max(10000, "Value is too long (maximum 10,000 characters)");
+const variableValue = z
+  .string()
+  .max(10000, "Value is too long (maximum 10,000 characters)")
+  .refine((v) => v !== MASK, `Value cannot be the masked placeholder (${MASK})`);
 
 export const createVariableSchema = z.object({
   key: variableKey,
   value: variableValue,
+  isSensitive: z.boolean().default(false),
 });
 
 export const updateVariableSchema = z
   .object({
     key: variableKey.optional(),
     value: variableValue.optional(),
+    isSensitive: z.boolean().optional(),
     version: z.number().int().min(1),
   })
-  .refine((d) => d.key !== undefined || d.value !== undefined, {
-    message: "Nothing to update",
-  });
+  .refine(
+    (d) => d.key !== undefined || d.value !== undefined || d.isSensitive !== undefined,
+    { message: "Nothing to update" }
+  );
