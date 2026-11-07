@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -14,6 +14,28 @@ import type { VariableDTO } from "@/lib/variableDto";
 export type VariableItem = VariableDTO;
 
 const NETWORK_ERROR = "Could not reach the server. Check your connection and try again.";
+const CLIPBOARD_ERROR = "Could not copy. Your browser may have blocked clipboard access.";
+const REVEAL_MS = 15000; // a revealed value hides itself after 15 seconds
+
+// Accepts a function that returns a promise, so Safari still allows the copy
+// even though the secret comes from a network request.
+async function copyText(getText: () => Promise<string>) {
+  if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+    const item = new ClipboardItem({
+      "text/plain": getText().then((t) => new Blob([t], { type: "text/plain" })),
+    });
+    await navigator.clipboard.write([item]);
+  } else {
+    await navigator.clipboard.writeText(await getText());
+  }
+}
+
+function describeError(e: unknown): string {
+  if (e instanceof DOMException) return CLIPBOARD_ERROR;
+  if (e instanceof TypeError) return NETWORK_ERROR;
+  if (e instanceof Error) return e.message;
+  return "Something went wrong. Please try again.";
+}
 
 export function VariableRow({ variable }: { variable: VariableItem }) {
   const router = useRouter();
@@ -26,12 +48,71 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState(false);
   const [confirmingDowngrade, setConfirmingDowngrade] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, []);
+
+  function hideRevealed() {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+    setRevealed(null);
+  }
+
+  async function fetchSecret(): Promise<string> {
+    const res = await fetch(`/api/variables/${variable.id}/reveal`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      router.push("/login");
+      throw new Error("Please log in again.");
+    }
+    if (!res.ok || typeof data.value !== "string") {
+      throw new Error(data.error ?? "Could not reveal this value.");
+    }
+    return data.value;
+  }
+
+  async function handleReveal() {
+    if (revealed !== null) {
+      hideRevealed();
+      return;
+    }
+    setRevealing(true);
+    setError(null);
+    try {
+      const value = await fetchSecret();
+      setRevealed(value);
+      hideTimer.current = setTimeout(hideRevealed, REVEAL_MS);
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setRevealing(false);
+    }
+  }
+
+  async function handleCopy() {
+    setError(null);
+    try {
+      // Sensitive: fetch and copy without ever showing or storing the plaintext
+      await copyText(variable.masked ? fetchSecret : async () => variable.value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      setError(describeError(e));
+    }
+  }
 
   function startEdit() {
+    hideRevealed();
     setDraftKey(variable.key);
     setDraftValue(variable.isSensitive ? "" : variable.value);
     setDraftIsSensitive(variable.isSensitive);
@@ -87,22 +168,12 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
       }
       setEditing(false);
       setDraftValue("");
+      hideRevealed();
       router.refresh();
     } catch {
       setError(NETWORK_ERROR);
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(variable.value);
-      setError(null);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setError("Could not copy. Your browser may have blocked clipboard access.");
     }
   }
 
@@ -180,7 +251,13 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
             error={fields.value}
           />
         ) : variable.masked ? (
-          <span className="font-mono text-sm text-gray-500">{variable.value}</span>
+          revealed !== null ? (
+            <span className="whitespace-pre-wrap break-all font-mono text-sm text-gray-700">
+              {revealed === "" ? "(empty)" : revealed}
+            </span>
+          ) : (
+            <span className="font-mono text-sm text-gray-500">{variable.value}</span>
+          )
         ) : variable.value === "" ? (
           <span className="text-sm italic text-muted">(empty)</span>
         ) : (
@@ -203,12 +280,14 @@ export function VariableRow({ variable }: { variable: VariableItem }) {
             </>
           ) : (
             <>
-              {/* Temporary: sensitive Copy arrives with the reveal endpoint in step 2.5 */}
-              {!variable.masked && (
-                <Button size="sm" variant="secondary" onClick={handleCopy}>
-                  {copied ? "Copied!" : "Copy"}
+              {variable.masked && (
+                <Button size="sm" variant="secondary" loading={revealing} onClick={handleReveal}>
+                  {revealed !== null ? "Hide" : "Reveal"}
                 </Button>
               )}
+              <Button size="sm" variant="secondary" onClick={handleCopy}>
+                {copied ? "Copied!" : "Copy"}
+              </Button>
               <Button size="sm" variant="secondary" onClick={startEdit}>
                 Edit
               </Button>
