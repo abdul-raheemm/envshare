@@ -484,12 +484,30 @@ Build history before encryption, so it is never retrofitted around secrets.
 - [ ] README and seed are updated.
 
 ## Phase 2 → Phase 3 handoff notes
-Before starting Phase 3, record here:
-- Final file layout / route names (service layer, crypto, history routes, timeline page): _(fill in)_
-- Any deviations from the schema above: _(fill in)_
-- Known issues carried over: _(fill in)_
-- Reusable pieces Phase 3 will call: `applyChange(tx, ..., batchId)`, `encrypt` / `decrypt`, `toVariableDTO`, and a server-side helper to load an environment's variables **decrypted for diffing only** (never returned to the client).
----
+- **Final file layout / route names:**
+  - `src/lib`: `crypto.ts` (encrypt/decrypt), `mask.ts` (MASK constant, client-safe), `variables.ts` (service functions plus `applyCreate` / `applyUpdate` / `applyDelete`), `variableDto.ts` (the only way a variable leaves the server), `history.ts` (`writeHistory`, `newBatchId`, `encryptPlainHistoryForKey`), `historyDto.ts`, `historyRead.ts` (`listHistory`, `revealHistoryValue`), `reveal.ts` (`revealVariable`), `access.ts` (adds `requireHistoryEntryAccess`).
+  - API: `POST /api/variables/[variableId]/reveal`, `GET /api/environments/[environmentId]/history`, `POST /api/history/[entryId]/reveal`.
+  - Pages and components: `/projects/[projectId]/history`, `components/history/HistoryTimeline` and `HistoryButton`, `components/ui/Switch`, new `Badge` variants.
+  - Tests: `tests/security/*`, `scripts/setup-test-db.mjs`, `scripts/http-sweep.mjs`. Commands: `npm test`, `npm run test:security`, `npm run sweep:http`.
+- **Deviations from the schema/plan:**
+  - `HistoryEntry` has `oldIsSensitive` / `newIsSensitive` (instead of a single `wasSensitive`) and `oldKey` for renames. Added `RevealLog` and the `HistoryAction` / `RevealSource` enums.
+  - A value is encrypted if and only if its `iv` is non-null (history and variables).
+  - `MASK` lives in `lib/mask.ts`, not `crypto.ts`, so client components can import it.
+  - No Toast component: "Copied!" shows on the button.
+  - There is no `GET` variables API route; the list is loaded server-side by the project page through `listVariables`.
+  - Added beyond the plan: an automated security suite and an HTTP sweep.
+- **Known issues / limits carried over:**
+  - A blank edit means "keep", so an existing Sensitive variable cannot be edited to an empty value.
+  - Reveal has no rate limit; password re-entry before reveal was not built (stretch goals).
+  - No key rotation.
+  - The history page shows one environment at a time (use the project page to switch).
+  - The HTTP sweep leaves a throwaway user and some history rows in the dev database (`npx prisma migrate reset` cleans it).
+  - Login rate limiting is in memory.
+- **Reusable for Phase 3:**
+  - `applyCreate(tx, ctx, environmentId, key, value, isSensitive)`, `applyUpdate(tx, ctx, current, input)` and `applyDelete(tx, ctx, variableId)` take a transaction and `ctx = { userId, batchId }`. Pass one shared `batchId` for a whole import. `applyUpdate` expects `current` loaded with the same fields as `requireVariableAccess` (including `isSensitive`, `iv`, `authTag`).
+  - `encrypt` / `decrypt`, `toVariableDTO`, and `writeHistory`.
+  - **To build in Phase 3:** a server-side helper that loads an environment's variables decrypted, for diffing only, never returned to the client.
+  ---
 
 # PHASE 3: Smart Import and Polish _(outline; expand when Phase 2 is done)_
 
