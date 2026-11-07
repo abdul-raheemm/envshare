@@ -318,23 +318,23 @@ Before starting Phase 2, record here:
 ---
 
 ## Step 2.0: Prerequisites (do these before any code)
-- [ ] Phase 1 Definition of Done is fully ticked, the working tree is clean and committed, and the Phase 1 handoff notes are filled in.
-- [ ] Docker Postgres is running and `npm run dev` works.
-- [ ] Delete or rotate any real secrets typed into the app during Phase 1 (they are plain text in the DB).
-- [ ] Generate `ENCRYPTION_KEY` (64 hex chars = 32 bytes), separate from `JWT_SECRET`:
+- [ x] Phase 1 Definition of Done is fully ticked, the working tree is clean and committed, and the Phase 1 handoff notes are filled in.
+- [x ] Docker Postgres is running and `npm run dev` works.
+- [ x] Delete or rotate any real secrets typed into the app during Phase 1 (they are plain text in the DB).
+- [ x] Generate `ENCRYPTION_KEY` (64 hex chars = 32 bytes), separate from `JWT_SECRET`:
       `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
-- [ ] Add `ENCRYPTION_KEY` to `.env` (real value) and `.env.example` (placeholder only). Confirm `.env` is still git-ignored.
-- [ ] Install and configure Vitest (`npm i -D vitest`), add an `npm test` script, and make the `@/` path alias resolve in the Vitest config. Run one trivial test to confirm it works.
-- [ ] List every Phase 1 route and data function that returns or accepts variable values (create, list, patch, delete, seed). These all get touched in 2.3 and 2.4. Write the list in the handoff notes.
-- [ ] Add a new shared UI components list to plan: `Badge` (Standard / Sensitive / action labels), `Switch` or checkbox toggle, `Toast` (for "Copied"). Rule from Phase 1 still applies: no ad-hoc styles.
+- [x ] Add `ENCRYPTION_KEY` to `.env` (real value) and `.env.example` (placeholder only). Confirm `.env` is still git-ignored.
+- [ x] Install and configure Vitest (`npm i -D vitest`), add an `npm test` script, and make the `@/` path alias resolve in the Vitest config. Run one trivial test to confirm it works.
+- [ x] List every Phase 1 route and data function that returns or accepts variable values (create, list, patch, delete, seed). These all get touched in 2.3 and 2.4. Write the list in the handoff notes.
+- [ x] Add a new shared UI components list to plan: `Badge` (Standard / Sensitive / action labels), `Switch` or checkbox toggle, `Toast` (for "Copied"). Rule from Phase 1 still applies: no ad-hoc styles.
 
 ## Step 2.1: Encryption helper (`src/lib/crypto.ts`)
-- [ ] `encrypt(plaintext)` returns `{ value, iv, authTag }` (all base64). Algorithm AES-256-GCM, 12-byte random IV generated fresh on every call, 16-byte auth tag.
-- [ ] `decrypt({ value, iv, authTag })` returns the plaintext string.
-- [ ] Load the key lazily from `ENCRYPTION_KEY`; validate it is exactly 32 bytes (64 hex chars). If missing or invalid, throw a clear but value-free error (e.g. "ENCRYPTION_KEY is missing or invalid").
-- [ ] All crypto errors are generic ("Could not decrypt this value"). Never include plaintext, ciphertext, IV or key in any message.
-- [ ] Vitest tests: round-trip works; same plaintext encrypted twice gives different ciphertext and IV; wrong key fails; a tampered ciphertext or auth tag fails; empty string and unicode round-trip; missing and short key are rejected.
-- [ ] Mask constant (`MASK = "••••••••"`) exported from one shared place.
+- [ x] `encrypt(plaintext)` returns `{ value, iv, authTag }` (all base64). Algorithm AES-256-GCM, 12-byte random IV generated fresh on every call, 16-byte auth tag.
+- [x ] `decrypt({ value, iv, authTag })` returns the plaintext string.
+- [x ] Load the key lazily from `ENCRYPTION_KEY`; validate it is exactly 32 bytes (64 hex chars). If missing or invalid, throw a clear but value-free error (e.g. "ENCRYPTION_KEY is missing or invalid").
+- [ x] All crypto errors are generic ("Could not decrypt this value"). Never include plaintext, ciphertext, IV or key in any message.
+- [ x] Vitest tests: round-trip works; same plaintext encrypted twice gives different ciphertext and IV; wrong key fails; a tampered ciphertext or auth tag fails; empty string and unicode round-trip; missing and short key are rejected.
+- [ x] Mask constant (`MASK = "••••••••"`) exported from one shared place.
 
 ## Step 2.2: Schema migration
 Add these models and enums (new tables only, no existing data touched), plus back-relations on `User` and `Environment`:
@@ -380,74 +380,74 @@ model RevealLog {
 }
 ```
 
-- [ ] Run `npx prisma migrate dev --name add_history_and_reveal_log`, then `npx prisma generate`.
-- [ ] Rule: a history value is **encrypted if and only if its `iv` is non-null**. This is the single source of truth for masking.
-- [ ] Note the deviation from the old draft (`wasSensitive` became `oldIsSensitive` / `newIsSensitive`, plus `oldKey`, and a separate `RevealLog`) in the handoff notes.
+- [ x] Run `npx prisma migrate dev --name add_history_and_reveal_log`, then `npx prisma generate`.
+- [ x] Rule: a history value is **encrypted if and only if its `iv` is non-null**. This is the single source of truth for masking.
+- [ x] Note the deviation from the old draft (`wasSensitive` became `oldIsSensitive` / `newIsSensitive`, plus `oldKey`, and a separate `RevealLog`) in the handoff notes.
 
 ## Step 2.3: Service layer with transactional history (plain variables first)
 Build history before encryption, so it is never retrofitted around secrets.
-- [ ] Move variable writes into service functions (in `src/lib`): `createVariable`, `updateVariable`, `deleteVariable`. Routes become thin wrappers. Each service function calls `requireProjectAccess` (loading variable → environment → project) as in Phase 1.
-- [ ] Internal `applyChange(tx, ...)` does the variable write plus the history write(s) inside one `prisma.$transaction`. It accepts an optional `batchId` (default: a new id). **Phase 3 import will reuse this with one shared `batchId`.**
-- [ ] CREATE row: `newValue` set. DELETE row: `oldValue` set. UPDATE row: `oldValue` and `newValue` set only if the value changed; a rename-only UPDATE stores `oldKey` and no values.
-- [ ] If the transaction fails, neither the variable change nor the history row is saved. Test this by forcing a failure.
-- [ ] Keep optimistic locking (`version`) working exactly as in Phase 1.
-- [ ] Verify: add, edit, rename, delete each produce the right history rows (check in Prisma Studio), and deleting a variable keeps its history.
+- [ x] Move variable writes into service functions (in `src/lib`): `createVariable`, `updateVariable`, `deleteVariable`. Routes become thin wrappers. Each service function calls `requireProjectAccess` (loading variable → environment → project) as in Phase 1.
+- [ x] Internal `applyChange(tx, ...)` does the variable write plus the history write(s) inside one `prisma.$transaction`. It accepts an optional `batchId` (default: a new id). **Phase 3 import will reuse this with one shared `batchId`.**
+- [x ] CREATE row: `newValue` set. DELETE row: `oldValue` set. UPDATE row: `oldValue` and `newValue` set only if the value changed; a rename-only UPDATE stores `oldKey` and no values.
+- [ x] If the transaction fails, neither the variable change nor the history row is saved. Test this by forcing a failure.
+- [ x] Keep optimistic locking (`version`) working exactly as in Phase 1.
+- [ x] Verify: add, edit, rename, delete each produce the right history rows (check in Prisma Studio), and deleting a variable keeps its history.
 
 ## Step 2.4: Sensitive variables, masking and type toggle
 **Write path**
-- [ ] zod: add `isSensitive` (boolean, default false) to create and patch bodies. For sensitive rows, `value` is optional on patch (**omitted = unchanged**).
-- [ ] Create sensitive: encrypt value, store ciphertext in `value` plus `iv` and `authTag`; `isSensitive = true`.
-- [ ] Edit sensitive value: encrypt the new value with a fresh IV. To decide whether the value actually changed, decrypt the old one server-side and compare.
-- [ ] **Reject a patch whose value equals the mask string** for a sensitive row (prevents saving "••••••••" over a real secret).
-- [ ] History rows copy the ciphertext, IV and auth tag from the variable columns (no re-encryption, no IV reuse issues). Standard values go into history as plain text with `iv = null`.
+- [x ] zod: add `isSensitive` (boolean, default false) to create and patch bodies. For sensitive rows, `value` is optional on patch (**omitted = unchanged**).
+- [ x] Create sensitive: encrypt value, store ciphertext in `value` plus `iv` and `authTag`; `isSensitive = true`.
+- [x ] Edit sensitive value: encrypt the new value with a fresh IV. To decide whether the value actually changed, decrypt the old one server-side and compare.
+- [ x] **Reject a patch whose value equals the mask string** for a sensitive row (prevents saving "••••••••" over a real secret).
+- [ x] History rows copy the ciphertext, IV and auth tag from the variable columns (no re-encryption, no IV reuse issues). Standard values go into history as plain text with `iv = null`.
 
 **Type toggle (both directions, logged as `TYPE_CHANGE`)**
-- [ ] Standard → Sensitive: encrypt the stored value, set `isSensitive`, bump `version`. Write a `TYPE_CHANGE` row with no values.
-- [ ] Sensitive → Standard: decrypt, store plain, clear `iv` and `authTag`, bump `version`. Write a `TYPE_CHANGE` row with no values.
-- [ ] If type and value change in the same request, write an `UPDATE` row and a `TYPE_CHANGE` row in the same batch.
-- [ ] **History re-encryption (decision 6):** after a variable becomes Sensitive (also on creating a sensitive variable), find all history rows in that environment whose `key` matches the current key **or any earlier key in its rename chain** (walk the `oldKey` links), and encrypt any `oldValue` / `newValue` that is still plain (`iv = null`). Do it inside the same transaction.
-- [ ] Vitest or manual test: create Standard → edit twice → rename → delete? (no) → toggle Sensitive → query `HistoryEntry`: no plaintext remains for that key.
+- [ x] Standard → Sensitive: encrypt the stored value, set `isSensitive`, bump `version`. Write a `TYPE_CHANGE` row with no values.
+- [x ] Sensitive → Standard: decrypt, store plain, clear `iv` and `authTag`, bump `version`. Write a `TYPE_CHANGE` row with no values.
+- [ x] If type and value change in the same request, write an `UPDATE` row and a `TYPE_CHANGE` row in the same batch.
+- [ x] **History re-encryption (decision 6):** after a variable becomes Sensitive (also on creating a sensitive variable), find all history rows in that environment whose `key` matches the current key **or any earlier key in its rename chain** (walk the `oldKey` links), and encrypt any `oldValue` / `newValue` that is still plain (`iv = null`). Do it inside the same transaction.
+- [ x] Vitest or manual test: create Standard → edit twice → rename → delete? (no) → toggle Sensitive → query `HistoryEntry`: no plaintext remains for that key.
 
 **Masking (every exit path)**
-- [ ] One serializer `toVariableDTO(variable)` is the **only** way a variable leaves the server. Returns `{ id, environmentId, key, isSensitive, value, masked, version, updatedAt, updatedBy }` where sensitive rows get `value = MASK` and `masked = true`. Never return ciphertext, `iv` or `authTag`.
-- [ ] Apply it to list, create, patch and any other route that returns variables. The list endpoint never decrypts anything.
-- [ ] Test: response JSON for a sensitive variable contains neither the plaintext nor the ciphertext.
+- [ x] One serializer `toVariableDTO(variable)` is the **only** way a variable leaves the server. Returns `{ id, environmentId, key, isSensitive, value, masked, version, updatedAt, updatedBy }` where sensitive rows get `value = MASK` and `masked = true`. Never return ciphertext, `iv` or `authTag`.
+- [ x] Apply it to list, create, patch and any other route that returns variables. The list endpoint never decrypts anything.
+- [ x] Test: response JSON for a sensitive variable contains neither the plaintext nor the ciphertext.
 
 **UI**
-- [ ] "Sensitive" switch on the add form and the edit form. Type badge on each row.
-- [ ] Sensitive rows show `••••••••`. Editing a sensitive row shows an empty value field ("Leave blank to keep the current value").
-- [ ] Switching Sensitive → Standard opens a confirmation `Modal`: "This value will be stored unencrypted."
+- [ x] "Sensitive" switch on the add form and the edit form. Type badge on each row.
+- [ x] Sensitive rows show `••••••••`. Editing a sensitive row shows an empty value field ("Leave blank to keep the current value").
+- [x ] Switching Sensitive → Standard opens a confirmation `Modal`: "This value will be stored unencrypted."
 
 ## Step 2.5: Reveal and Copy
-- [ ] `POST /api/variables/:id/reveal` (POST, not GET). Checks project access (404 if none), requires the variable to be sensitive, decrypts, and returns `{ value }` with `Cache-Control: no-store`.
-- [ ] **Fail closed:** write the `RevealLog` row (source `VARIABLE`) before returning the value. If logging fails, return an error and no value.
-- [ ] Decryption failure returns a generic error ("Could not decrypt this value") and logs only the error type.
-- [ ] UI: an eye/Reveal button on sensitive rows. The revealed value is held in component state only (not in URLs, not in localStorage), and **auto-hides after about 15 seconds**.
-- [ ] UI: the Copy button on a sensitive row calls reveal, copies to the clipboard without displaying it, and shows a "Copied" toast. Standard rows copy directly as before.
-- [ ] Optional: simple per-user rate limit on reveal (in memory, like the login limit).
+- [x ] `POST /api/variables/:id/reveal` (POST, not GET). Checks project access (404 if none), requires the variable to be sensitive, decrypts, and returns `{ value }` with `Cache-Control: no-store`.
+- [ x] **Fail closed:** write the `RevealLog` row (source `VARIABLE`) before returning the value. If logging fails, return an error and no value.
+- [ x] Decryption failure returns a generic error ("Could not decrypt this value") and logs only the error type.
+- [ x] UI: an eye/Reveal button on sensitive rows. The revealed value is held in component state only (not in URLs, not in localStorage), and **auto-hides after about 15 seconds**.
+- [ x] UI: the Copy button on a sensitive row calls reveal, copies to the clipboard without displaying it, and shows a "Copied" toast. Standard rows copy directly as before.
+- [ x] Optional: simple per-user rate limit on reveal (in memory, like the login limit).
 
 ## Step 2.6: History read API and timeline UI
-- [ ] `GET /api/environments/:id/history?cursor=&limit=` (membership checked, 404 otherwise). Newest first, cursor pagination (default 50). Each item: `id, batchId, action, key, oldKey, oldIsSensitive, newIsSensitive, changedAt, changedBy { name }, old: { masked, value }, new: { masked, value }`. If a value is encrypted (`iv` non-null) return `masked: true` and `value = MASK`; otherwise the plain value. Never return `iv` / `authTag` / ciphertext.
-- [ ] `POST /api/history/:id/reveal` with body `{ which: "old" | "new" }`. Load entry → environment → project → check access. Only works for encrypted values. Writes `RevealLog` (source `HISTORY`) before returning, `no-store`.
-- [ ] No endpoint exists that edits or deletes history.
-- [ ] UI: an obvious **History** button/tab per environment, leading to a timeline page.
-- [ ] Timeline groups entries by `batchId`: header with user, date/time and change count. Each row shows an action `Badge` (text + color), the key (with "renamed from X" when `oldKey` is set), and old → new values. Encrypted values show the mask with a per-row, per-side reveal button (auto-hide like 2.5). `TYPE_CHANGE` rows show "Standard → Sensitive" and no values.
-- [ ] Empty state ("No changes yet"), loading state, and a "Load more" button.
+- [ x] `GET /api/environments/:id/history?cursor=&limit=` (membership checked, 404 otherwise). Newest first, cursor pagination (default 50). Each item: `id, batchId, action, key, oldKey, oldIsSensitive, newIsSensitive, changedAt, changedBy { name }, old: { masked, value }, new: { masked, value }`. If a value is encrypted (`iv` non-null) return `masked: true` and `value = MASK`; otherwise the plain value. Never return `iv` / `authTag` / ciphertext.
+- [x ] `POST /api/history/:id/reveal` with body `{ which: "old" | "new" }`. Load entry → environment → project → check access. Only works for encrypted values. Writes `RevealLog` (source `HISTORY`) before returning, `no-store`.
+- [ x] No endpoint exists that edits or deletes history.
+- [ x] UI: an obvious **History** button/tab per environment, leading to a timeline page.
+- [ x] Timeline groups entries by `batchId`: header with user, date/time and change count. Each row shows an action `Badge` (text + color), the key (with "renamed from X" when `oldKey` is set), and old → new values. Encrypted values show the mask with a per-row, per-side reveal button (auto-hide like 2.5). `TYPE_CHANGE` rows show "Standard → Sensitive" and no values.
+- [x ] Empty state ("No changes yet"), loading state, and a "Load more" button.
 
 ## Step 2.7: Security sweep (do not skip)
-- [ ] **DB inspection:** in Prisma Studio or psql, `Variable` and `HistoryEntry` show ciphertext (base64) for sensitive values. Dump the DB and search it for a known test secret: zero matches.
-- [ ] **Network tab:** create, list, patch, history list and reveal responses. A masked value never appears in plaintext, except in the reveal response itself. Check the reveal response has `Cache-Control: no-store`.
-- [ ] **Logs:** search the dev server output for the test secret: zero matches. Confirm validation errors never echo submitted values.
-- [ ] **Non-member attack:** as User B, call history list, history reveal and variable reveal on User A's IDs. All must return 404.
-- [ ] **Tamper test:** change one character of a ciphertext (or auth tag) in the DB. Reveal returns the generic error, nothing leaks, and the list endpoint still works.
-- [ ] **Wrong key test:** restart with a different `ENCRYPTION_KEY`. The app does not crash, lists still load, reveals fail gracefully. Restore the real key afterwards.
-- [ ] **IV test:** encrypt the same value twice; ciphertext and IV differ.
-- [ ] **Toggle test:** Standard → Sensitive → Standard; both are logged, and old history is still encrypted afterwards.
-- [ ] **Re-encryption trap test:** a key edited several times and renamed while Standard has no plaintext history left once it becomes Sensitive.
-- [ ] **Mask-overwrite test:** try to save the mask string over a sensitive value: rejected. Editing with the value field blank leaves the secret unchanged.
-- [ ] **Stale edit:** two tabs editing the same variable still produce the conflict message.
-- [ ] **Deletion test:** deleting a variable keeps its history rows.
-- [ ] **Audit test:** every reveal (variable and history) creates a `RevealLog` row with the right user and key, and never the value.
+- [ x] **DB inspection:** in Prisma Studio or psql, `Variable` and `HistoryEntry` show ciphertext (base64) for sensitive values. Dump the DB and search it for a known test secret: zero matches.
+- [x ] **Network tab:** create, list, patch, history list and reveal responses. A masked value never appears in plaintext, except in the reveal response itself. Check the reveal response has `Cache-Control: no-store`.
+- [ x] **Logs:** search the dev server output for the test secret: zero matches. Confirm validation errors never echo submitted values.
+- [ x] **Non-member attack:** as User B, call history list, history reveal and variable reveal on User A's IDs. All must return 404.
+- [ x] **Tamper test:** change one character of a ciphertext (or auth tag) in the DB. Reveal returns the generic error, nothing leaks, and the list endpoint still works.
+- [ x] **Wrong key test:** restart with a different `ENCRYPTION_KEY`. The app does not crash, lists still load, reveals fail gracefully. Restore the real key afterwards.
+- [x ] **IV test:** encrypt the same value twice; ciphertext and IV differ.
+- [ x] **Toggle test:** Standard → Sensitive → Standard; both are logged, and old history is still encrypted afterwards.
+- [x ] **Re-encryption trap test:** a key edited several times and renamed while Standard has no plaintext history left once it becomes Sensitive.
+- [x ] **Mask-overwrite test:** try to save the mask string over a sensitive value: rejected. Editing with the value field blank leaves the secret unchanged.
+- [ x] **Stale edit:** two tabs editing the same variable still produce the conflict message.
+- [ x] **Deletion test:** deleting a variable keeps its history rows.
+- [x ] **Audit test:** every reveal (variable and history) creates a `RevealLog` row with the right user and key, and never the value.
 
 ## Step 2.8: Seed, README, handoff
 - [ ] Update the seed script to create a few sensitive variables and some history (use the service functions or the crypto helper, never raw plain text in sensitive rows).
