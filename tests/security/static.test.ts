@@ -125,7 +125,7 @@ describe("secrets hygiene", () => {
   });
 
   it(".env.example holds placeholders, not real keys", () => {
-    expect(read(".env.example")).not.toMatch(/^ENCRYPTION_KEY=[0-9a-fA-F]{64}\s*$/m);
+        expect(read(".env.example")).not.toMatch(/^ENCRYPTION_KEY=["']?[0-9a-fA-F]{64}["']?\s*$/m);
   });
 
   it("the real ENCRYPTION_KEY and JWT_SECRET appear in no tracked file", () => {
