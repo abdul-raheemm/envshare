@@ -86,3 +86,7 @@ export const updateVariableSchema = z
     (d) => d.key !== undefined || d.value !== undefined || d.isSensitive !== undefined,
     { message: "Nothing to update" }
   );
+  
+  export const revealHistorySchema = z.object({
+  which: z.enum(["old", "new"], { message: "Choose old or new" }),
+});

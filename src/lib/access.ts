@@ -66,3 +66,27 @@ export async function requireVariableAccess(userId: string, variableId: string) 
 
   return variable;
 }
+
+export async function requireHistoryEntryAccess(userId: string, entryId: string) {
+  const entry = await prisma.historyEntry.findUnique({
+    where: { id: entryId },
+    select: {
+      id: true,
+      environmentId: true,
+      key: true,
+      oldValue: true,
+      oldIv: true,
+      oldAuthTag: true,
+      newValue: true,
+      newIv: true,
+      newAuthTag: true,
+      environment: { select: { projectId: true } },
+    },
+  });
+  if (!entry) throw new ApiError(404, "History entry not found");
+
+  const access = await getProjectAccess(userId, entry.environment.projectId);
+  if (!access) throw new ApiError(404, "History entry not found");
+
+  return entry;
+}
