@@ -31,14 +31,26 @@ function routeMethods(text: string): string[] {
 const read = (p: string) => readFileSync(path.join(ROOT, p), "utf8");
 
 describe("code-level security rules", () => {
-  it("only the audited server modules import the crypto helper", () => {
+    it("only the audited server modules import the crypto helper", () => {
     const importers = nonTest.filter((f) => importsOf(f.text, "@/lib/crypto")).map((f) => f.file).sort();
     expect(importers).toEqual([
       "src/lib/history.ts",
       "src/lib/historyRead.ts",
+      "src/lib/importLoad.ts",
       "src/lib/reveal.ts",
       "src/lib/variables.ts",
     ]);
+  });
+
+  it("only importPlan.ts uses the plaintext loader", () => {
+    const users = nonTest.filter((f) => importsOf(f.text, "@/lib/importLoad")).map((f) => f.file);
+    expect(users).toEqual(["src/lib/importPlan.ts"]);
+  });
+
+  it("the import preview route is POST-only and never cached", () => {
+    const p = "src/app/api/environments/[environmentId]/import/preview/route.ts";
+    expect(routeMethods(read(p))).toEqual(["POST"]);
+    expect(read(p), p).toContain("no-store");
   });
 
   it('no "use client" file imports server-only modules', () => {
@@ -51,6 +63,8 @@ describe("code-level security rules", () => {
       "@/lib/reveal",
       "@/lib/history",
       "@/lib/historyRead",
+      "@/lib/importLoad",
+      "@/lib/importPlan",
     ];
     const offenders: string[] = [];
     for (const f of nonTest) {
