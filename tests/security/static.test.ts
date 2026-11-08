@@ -53,6 +53,12 @@ describe("code-level security rules", () => {
     expect(read(p), p).toContain("no-store");
   });
 
+  it("the import apply route is POST-only and never cached", () => {
+    const p = "src/app/api/environments/[environmentId]/import/apply/route.ts";
+    expect(routeMethods(read(p))).toEqual(["POST"]);
+    expect(read(p), p).toContain("no-store");
+  });
+
   it('no "use client" file imports server-only modules', () => {
     const forbidden = [
       "@/lib/crypto",
