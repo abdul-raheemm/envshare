@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { requireEnvironmentAccess } from "@/lib/access";
-import { ApiError } from "@/lib/errors";
+import { ApiError, isUniqueViolation } from "@/lib/errors";
+import { newBatchId } from "@/lib/history";
+import { MASK } from "@/lib/mask";
 import { parseEnv, type ParseIssue } from "@/lib/parseEnv";
 import {
   computeDiff,
@@ -10,12 +12,14 @@ import {
   type PreviewRow,
   type DiffCounts,
 } from "@/lib/importDiff";
+import type { ApplyImportInput } from "@/lib/importSchemas";
 import { loadExistingForDiff } from "@/lib/importLoad";
 import {
   MAX_IMPORT_BYTES,
   MAX_IMPORT_ENTRIES,
   MAX_ISSUES_RETURNED,
 } from "@/lib/importLimits";
+import { applyCreate, applyUpdate } from "@/lib/variables";
 
 type Db = Pick<typeof prisma, "variable">;
 
@@ -40,6 +44,13 @@ export async function buildImportPlan(
     throw new ApiError(
       400,
       `Too many variables. The limit is ${MAX_IMPORT_ENTRIES} per import.`
+    );
+  }
+    // Someone pasting a masked copy would overwrite real secrets with bullets
+  if (entries.some((e) => e.value === MASK)) {
+    throw new ApiError(
+      400,
+      "One of the values is the masked placeholder. Replace it with the real value or remove that line."
     );
   }
 
@@ -93,4 +104,108 @@ export async function previewImport(
       duplicates,
     },
   };
+}
+
+const STALE = "Variables changed since you reviewed this import. Review it again.";
+
+export type ImportResult = {
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  ignoredLines: number; // invalid lines that were skipped
+  batchId: string | null; // null when nothing was written
+};
+
+export async function applyImport(
+  userId: string,
+  environmentId: string,
+  input: ApplyImportInput
+): Promise<ImportResult> {
+  await requireEnvironmentAccess(userId, environmentId); // 404 for non-members
+
+  // Maps built from own entries only: keys like "__proto__" can't do anything odd
+  const overrides = new Map(Object.entries(input.rowOverrides));
+  const expected = new Map(Object.entries(input.expectedVersions));
+
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        // Re-parse and re-diff here. Nothing from the preview is trusted.
+        const { plan, issues } = await buildImportPlan(
+          tx,
+          environmentId,
+          input.text,
+          input.autoFlagSensitive
+        );
+
+        const ctx = { userId, batchId: newBatchId() };
+        const result: ImportResult = {
+          created: 0,
+          updated: 0,
+          unchanged: 0,
+          skipped: 0,
+          ignoredLines: issues.filter((i) => i.kind !== "DUPLICATE_KEY").length,
+          batchId: null,
+        };
+
+        for (const row of plan) {
+          if (row.status === "UNCHANGED") {
+            result.unchanged++;
+            continue;
+          }
+
+          const override = overrides.get(row.key);
+          if (override?.skip) {
+            result.skipped++;
+            continue;
+          }
+
+          const seen = expected.get(row.key);
+
+          if (row.status === "NEW") {
+            // Preview saw an existing variable, but the key is gone (or the client forged a version)
+            if (seen !== undefined) throw new ApiError(409, STALE);
+            const isSensitive = override?.isSensitive ?? row.isSensitive;
+            await applyCreate(tx, ctx, environmentId, row.key, row.newValue, isSensitive);
+            result.created++;
+            continue;
+          }
+
+          // UPDATE: the user must have reviewed exactly this version
+          if (seen === undefined || seen !== row.existingVersion) {
+            throw new ApiError(409, STALE);
+          }
+          const current = await tx.variable.findUnique({
+            where: { id: row.existingId! },
+            select: {
+              id: true,
+              key: true,
+              value: true,
+              isSensitive: true,
+              iv: true,
+              authTag: true,
+              version: true,
+              environmentId: true,
+              environment: { select: { projectId: true } },
+            },
+          });
+          if (!current) throw new ApiError(409, STALE);
+          // Type never changes on import: no isSensitive passed
+          await applyUpdate(tx, ctx, current, { value: row.newValue, version: seen });
+          result.updated++;
+        }
+
+        if (result.created + result.updated > 0) result.batchId = ctx.batchId;
+        return result;
+      },
+      { timeout: 30_000, maxWait: 5_000 } // default is 5s; 500 rows need more
+    );
+  } catch (e) {
+    // A race on the same key (unique violation) or any conflict means "review again"
+    if (isUniqueViolation(e) || (e instanceof ApiError && e.status === 409)) {
+      throw new ApiError(409, STALE);
+    }
+    throw e;
+  }
 }
