@@ -4,15 +4,9 @@ import { ApiError, isUniqueViolation } from "@/lib/errors";
 import { newBatchId } from "@/lib/history";
 import { MASK } from "@/lib/mask";
 import { parseEnv, type ParseIssue } from "@/lib/parseEnv";
-import {
-  computeDiff,
-  countRows,
-  toPreviewRows,
-  type PlanRow,
-  type PreviewRow,
-  type DiffCounts,
-} from "@/lib/importDiff";
+import { computeDiff, countRows, toPreviewRows, type PlanRow } from "@/lib/importDiff";
 import type { ApplyImportInput } from "@/lib/importSchemas";
+import type { ImportPreview, ImportResult } from "@/lib/importTypes";
 import { loadExistingForDiff } from "@/lib/importLoad";
 import {
   MAX_IMPORT_BYTES,
@@ -61,18 +55,7 @@ export async function buildImportPlan(
 
 // What the client is allowed to see about a parse issue.
 // Deliberately NO `raw` field: it can contain the pasted secret.
-export type PreviewIssue = {
-  line: number;
-  kind: ParseIssue["kind"];
-  message: string;
-};
 
-export type ImportPreview = {
-  rows: PreviewRow[];
-  issues: PreviewIssue[];
-  issuesTruncated: boolean;
-  counts: DiffCounts & { invalid: number; duplicates: number };
-};
 
 export async function previewImport(
   userId: string,
@@ -107,15 +90,6 @@ export async function previewImport(
 }
 
 const STALE = "Variables changed since you reviewed this import. Review it again.";
-
-export type ImportResult = {
-  created: number;
-  updated: number;
-  unchanged: number;
-  skipped: number;
-  ignoredLines: number; // invalid lines that were skipped
-  batchId: string | null; // null when nothing was written
-};
 
 export async function applyImport(
   userId: string,
