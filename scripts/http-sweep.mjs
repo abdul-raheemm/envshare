@@ -151,6 +151,87 @@ check("validation error is 400 and never echoes the submitted value", bad.status
 const malformed = await call(alice.cookie, "POST", `/api/environments/${envId}/variables`, "{not json");
 check("malformed JSON returns a clean 4xx without a stack trace", malformed.status >= 400 && malformed.status < 500 && !/node_modules|\.tsx?:\d+/.test(malformed.text), `status ${malformed.status}`);
 
+// ---- Import: preview and apply ----
+// Apply only updates the sweep's own variable. The extra new key is skipped on apply,
+// so the import checks leave nothing behind except history rows.
+const importBase = `/api/environments/${envId}/import`;
+const IMPORTED = `${CANARY}-imported`;
+const STALE = `${CANARY}-stale`;
+const plainKey = `SWEEP_PLAIN_${tag.toUpperCase()}`;
+const noStore = (r) => /no-store/i.test(r.headers.get("cache-control") ?? "");
+const secretNow = async () => (await call(alice.cookie, "POST", revealPath)).json?.value;
+
+for (const route of ["preview", "apply"]) {
+  const p = `${importBase}/${route}`;
+  check(`import ${route}: unauthenticated gets 401`, (await call(null, "POST", p, { text: "A=1" })).status === 401);
+  const outRes = await call(outsider.cookie, "POST", p, { text: `${KEY}=${CANARY}` });
+  check(`import ${route}: outsider gets 404 and no secret`, outRes.status === 404 && !outRes.text.includes(CANARY), `status ${outRes.status}`);
+  check(`import ${route}: GET is not allowed (405)`, (await call(alice.cookie, "GET", p)).status === 405);
+  const wrongType = await call(alice.cookie, "POST", p, "A=1", { "Content-Type": "text/plain" });
+  check(`import ${route}: wrong content type is rejected (415)`, wrongType.status === 415, `status ${wrongType.status}`);
+  const mal = await call(alice.cookie, "POST", p, "{not json");
+  check(`import ${route}: malformed JSON returns a clean 4xx without a stack trace`, mal.status >= 400 && mal.status < 500 && !/node_modules|\.tsx?:\d+/.test(mal.text), `status ${mal.status}`);
+  check(`import ${route}: empty text is rejected (400)`, (await call(alice.cookie, "POST", p, { text: "" })).status === 400);
+  const big = await call(alice.cookie, "POST", p, { text: "A=1\n".repeat(30000) + CANARY });
+  check(`import ${route}: oversize text is rejected (400) without echoing it`, big.status === 400 && !big.text.includes(CANARY), `status ${big.status}`);
+  const masked = await call(alice.cookie, "POST", p, { text: `${KEY}=${MASK}` });
+  check(`import ${route}: the masked placeholder is rejected (400)`, masked.status === 400, `status ${masked.status}`);
+}
+
+const importText = `${KEY}=${IMPORTED}\n${plainKey}=hello`;
+
+const pv = await call(alice.cookie, "POST", `${importBase}/preview`, { text: importText });
+check("import preview: member gets 200 with Cache-Control: no-store", pv.status === 200 && noStore(pv), `status ${pv.status}`);
+check("import preview: response contains no plaintext secret", !pv.text.includes(CANARY));
+const pvRow = pv.json?.rows?.find((r) => r.key === KEY);
+check(
+  "import preview: the existing Sensitive key is an UPDATE with masked old and new values",
+  pvRow?.status === "UPDATE" && pvRow.isSensitive === true && pvRow.oldValue === MASK && pvRow.newValue === MASK && typeof pvRow.version === "number"
+);
+const pvPlain = pv.json?.rows?.find((r) => r.key === plainKey);
+check("import preview: the new Standard key is NEW and shows its value", pvPlain?.status === "NEW" && pvPlain.newValue === "hello");
+const histAfterPreview = await call(alice.cookie, "GET", `/api/environments/${envId}/history`);
+check(
+  "import preview: wrote nothing (no history for the new key, secret unchanged)",
+  !histAfterPreview.text.includes(plainKey) && (await secretNow()) === CANARY
+);
+
+const reviewedVersion = pvRow?.version;
+const applyPath = `${importBase}/apply`;
+
+const noVersion = await call(alice.cookie, "POST", applyPath, { text: `${KEY}=${IMPORTED}` });
+check("import apply: an UPDATE without the reviewed version is rejected (409) and writes nothing", noVersion.status === 409 && (await secretNow()) === CANARY, `status ${noVersion.status}`);
+
+const outApply = await call(outsider.cookie, "POST", applyPath, { text: `${KEY}=hacked`, expectedVersions: { [KEY]: reviewedVersion } });
+check("import apply: an outsider cannot change the secret", outApply.status === 404 && (await secretNow()) === CANARY, `status ${outApply.status}`);
+
+const ap = await call(alice.cookie, "POST", applyPath, {
+  text: importText,
+  rowOverrides: { [plainKey]: { skip: true } },
+  expectedVersions: { [KEY]: reviewedVersion },
+});
+check(
+  "import apply: member gets 200 with counts, Cache-Control: no-store",
+  ap.status === 200 && noStore(ap) && ap.json?.updated === 1 && ap.json?.created === 0 && ap.json?.skipped === 1 && typeof ap.json?.batchId === "string",
+  `status ${ap.status} ${ap.text.slice(0, 120)}`
+);
+check("import apply: response has counts only, no values", !ap.text.includes(CANARY) && !ap.text.includes("hello"));
+check("import apply: the secret now holds the imported value", (await secretNow()) === IMPORTED);
+
+const histAfterApply = await call(alice.cookie, "GET", `/api/environments/${envId}/history`);
+const batchItems = histAfterApply.json?.items?.filter((i) => i.batchId === ap.json?.batchId) ?? [];
+check(
+  "import apply: history has one masked UPDATE row for the batch",
+  batchItems.length === 1 && batchItems[0].key === KEY && batchItems[0].action === "UPDATE" && batchItems[0].old?.masked === true && batchItems[0].new?.masked === true
+);
+check("import apply: history shows no plaintext and no skipped key", !histAfterApply.text.includes(CANARY) && !histAfterApply.text.includes(plainKey));
+
+const again = await call(alice.cookie, "POST", applyPath, { text: `${KEY}=${IMPORTED}` });
+check("import apply: applying the same text again changes nothing", again.status === 200 && again.json?.unchanged === 1 && again.json?.batchId === null, `status ${again.status}`);
+
+const stale = await call(alice.cookie, "POST", applyPath, { text: `${KEY}=${STALE}`, expectedVersions: { [KEY]: reviewedVersion } });
+check("import apply: a stale reviewed version is rejected (409) and writes nothing", stale.status === 409 && (await secretNow()) === IMPORTED, `status ${stale.status}`);
+
 // ---- Login behaviour ----
 const wrongPw = await call(null, "POST", "/api/auth/login", { email: ALICE.email, password: "definitely-wrong" });
 const noUser = await call(null, "POST", "/api/auth/login", { email: `nobody-${tag}@example.com`, password: "definitely-wrong" });
