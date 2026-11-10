@@ -13,6 +13,7 @@ import { listMembers } from "@/lib/projects";
 import { requireUserForPage } from "@/lib/session";
 import { listVariables } from "@/lib/variables";
 import { HistoryButton } from "@/components/history/HistoryButton";
+import { ImportEnvButton } from "@/components/variables/ImportEnvButton";
 
 export default async function ProjectPage({
   params,
@@ -53,10 +54,17 @@ export default async function ProjectPage({
       />
 
       <Card className="space-y-4">
-                <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-gray-900">Environments</h2>
           {activeEnv && (
-            <HistoryButton href={`/projects/${projectId}/history?env=${activeEnv.id}`} />
+            <div className="flex items-center gap-2">
+              <ImportEnvButton
+                key={activeEnv.id}
+                projectId={projectId}
+                environmentId={activeEnv.id}
+              />
+              <HistoryButton href={`/projects/${projectId}/history?env=${activeEnv.id}`} />
+            </div>
           )}
         </div>
         {activeEnv ? (

@@ -450,11 +450,11 @@ Build history before encryption, so it is never retrofitted around secrets.
 - [x ] **Audit test:** every reveal (variable and history) creates a `RevealLog` row with the right user and key, and never the value.
 
 ## Step 2.8: Seed, README, handoff
-- [ ] Update the seed script to create a few sensitive variables and some history (use the service functions or the crypto helper, never raw plain text in sensitive rows).
-- [ ] README: add `ENCRYPTION_KEY` to the environment table with the generation command and the key-loss warning, add assumptions 5-9, update security notes (encryption, masking, reveal audit, append-only history), and add the new `npm test` script.
-- [ ] Confirm `.env.example` has the placeholder and `.env` is untracked.
-- [ ] Update the Status Tracker, tick this checklist, and fill in the handoff notes below.
-- [ ] Commit.
+- [ x] Update the seed script to create a few sensitive variables and some history (use the service functions or the crypto helper, never raw plain text in sensitive rows).
+- [ x] README: add `ENCRYPTION_KEY` to the environment table with the generation command and the key-loss warning, add assumptions 5-9, update security notes (encryption, masking, reveal audit, append-only history), and add the new `npm test` script.
+- [x ] Confirm `.env.example` has the placeholder and `.env` is untracked.
+- [ x] Update the Status Tracker, tick this checklist, and fill in the handoff notes below.
+- [ x] Commit.
 
 ---
 
@@ -473,15 +473,15 @@ Build history before encryption, so it is never retrofitted around secrets.
 | Losing `ENCRYPTION_KEY` | Separate from `JWT_SECRET`, never committed, documented |
 
 ## Phase 2: Definition of Done
-- [ ] DB inspection shows ciphertext for sensitive values in **both** `Variable` and `HistoryEntry`.
-- [ ] The network tab never shows plaintext for masked values (only the explicit reveal response).
-- [ ] Type toggle works in both directions and is logged; old history is protected on Standard → Sensitive.
-- [ ] Reveal and Copy work for sensitive values, auto-hide works, and every reveal is audited.
-- [ ] History is written in the same transaction as every add, edit, rename, delete and type change, and survives variable deletion.
-- [ ] Timeline shows who, what and when, grouped by batch, with masked sensitive values and a per-row reveal.
-- [ ] Non-members cannot reach any new endpoint (404).
-- [ ] Crypto unit tests pass; the security sweep checklist is fully ticked.
-- [ ] README and seed are updated.
+- [ x] DB inspection shows ciphertext for sensitive values in **both** `Variable` and `HistoryEntry`.
+- [x ] The network tab never shows plaintext for masked values (only the explicit reveal response).
+- [ x] Type toggle works in both directions and is logged; old history is protected on Standard → Sensitive.
+- [ x] Reveal and Copy work for sensitive values, auto-hide works, and every reveal is audited.
+- [ x] History is written in the same transaction as every add, edit, rename, delete and type change, and survives variable deletion.
+- [ x] Timeline shows who, what and when, grouped by batch, with masked sensitive values and a per-row reveal.
+- [ x] Non-members cannot reach any new endpoint (404).
+- [ x] Crypto unit tests pass; the security sweep checklist is fully ticked.
+- [ x] README and seed are updated.
 
 ## Phase 2 → Phase 3 handoff notes
 - **Final file layout / route names:**
@@ -509,19 +509,179 @@ Build history before encryption, so it is never retrofitted around secrets.
   - **To build in Phase 3:** a server-side helper that loads an environment's variables decrypted, for diffing only, never returned to the client.
   ---
 
-# PHASE 3: Smart Import and Polish _(outline; expand when Phase 2 is done)_
+# PHASE 3: Smart Import and Polish
 
-**Goal:** The .env paste import with visual review, plus final polish for the demo.
+**Goal:** Paste a whole `.env` block, review exactly what will happen (🟢 New / 🟡 Update / ⚪ Unchanged), apply it in one transaction with one history batch, then polish everything for the demo.
 
-**Covers brief sections:** 2D (Smart Copy-Paste Import), the usability and consistency requirements.
+**Covers brief sections:** 2D (Smart Copy-Paste Import), the usability and consistency requirements in section 3, and milestone Step 4.
 
-### Scope
-1. **Parser** (`lib/parseEnv.ts`, a pure function with unit tests): skips blank lines and `#` lines; handles `export KEY=value`, quoted values, inline comments, `=` inside values, CRLF/BOM, empty values, multiline quoted values, and duplicate keys.
-2. **Diff:** compare parsed pairs with the environment's existing variables → 🟢 New / 🟡 Update (old vs new) / ⚪ Unchanged. Sensitive values are decrypted server-side only for the comparison.
-3. **Preview UI:** text labels as well as colors; masked values for sensitive keys with per-row reveal; summary counts.
-4. **Apply:** a single transaction that writes the variables and one history batch. Missing keys are not deleted.
-5. **Type handling:** new keys default to Standard, with optional auto-flagging of names containing SECRET, KEY, TOKEN, PASSWORD; existing keys keep their current type.
-6. **Polish:** README, seed data, error-message review, loading/empty states, and demo script.
+> ⚠️ **The diff needs plaintext of Sensitive values. Decrypt only on the server, only for comparison, and never return it to the client.** This is the main security risk of this phase.
+
+## Phase 3 design decisions (locked unless you change them)
+1. **Parser is a pure function** in `src/lib/parseEnv.ts`: text in, `{ entries, warnings }` out. No DB, no crypto.
+2. **Two endpoints, same logic:** `preview` (read-only, writes nothing) and `apply` (writes). Apply **recomputes the diff on the server**; it never trusts the client's preview result.
+3. **Duplicate keys in the pasted text:** last one wins, with a warning shown in the preview.
+4. **Existing keys keep their current type.** New keys default to Standard, with an optional auto-flag for names containing SECRET, KEY, TOKEN, PASSWORD (user can override per row).
+5. **Import never deletes** keys missing from the paste (assumption 4).
+6. **One import = one `batchId`** and one transaction. All or nothing.
+7. **Invalid keys** (fail `^[A-Za-z_][A-Za-z0-9_]*$`) are shown as errors in the preview and skipped, never silently dropped.
+8. **Optimistic locking applies:** apply sends each Update's expected `version`; if anything changed since preview, the whole import fails with a clear "reload and review again" message.
+
+## Step 3.0: Prep and baseline
+- [ x] Pull the latest, confirm `npm test`, `npm run test:security` and `npm run lint` all pass before touching anything.
+- [ x] Add a "Phase 3 handoff" scratch note listing the helper signatures you will reuse: `applyCreate`, `applyUpdate`, `applyDelete`, `encrypt`/`decrypt`, `toVariableDTO`, `writeHistory`, `newBatchId`.
+- [ x] Decide a size cap now: max pasted text 100 KB and max 500 entries per import (reject larger with a clear message).
+
+## Step 3.1: The parser (`src/lib/parseEnv.ts`)
+Define the output shape first:
+```ts
+type ParsedEntry = { key: string; value: string; line: number; hadExport: boolean };
+type ParseIssue = { line: number; kind: 'INVALID_LINE' | 'INVALID_KEY' | 'DUPLICATE_KEY' | 'UNTERMINATED_QUOTE'; message: string; raw: string };
+parseEnv(text: string): { entries: ParsedEntry[]; issues: ParseIssue[] }
+```
+- [ x] Normalize first: strip a leading BOM, convert CRLF/CR to LF.
+- [ x] Skip blank lines and lines whose first non-space character is `#`.
+- [ x] Accept an optional `export ` prefix.
+- [ x] Split on the **first** `=` only (`DATABASE_URL=postgres://a?b=c` keeps everything after the first `=`).
+- [ x] Trim whitespace around the key and around unquoted values.
+- [ x] Unquoted values: strip an inline comment only when `#` is preceded by whitespace (`PORT=3000 # dev` gives `3000`, but `COLOR=#fff` stays `#fff`).
+- [x ] Double-quoted values: support escapes (`\n`, `\"`, `\\`) and **multiline** values (keep reading lines until the closing quote). Unterminated quote gives an issue, not a crash.
+- [x ] Single-quoted values: literal, no escapes, may be multiline.
+- [x ] Empty values (`KEY=`, `KEY=""`) are valid and give `""`.
+- [x ] Lines with no `=` become `INVALID_LINE` issues.
+- [x ] Duplicate keys: last wins, one `DUPLICATE_KEY` issue per duplicate.
+- [x ] Enforce the key regex; failures become `INVALID_KEY` issues.
+- [x ] Do **not** expand `${VAR}` references; treat them as literal text (document this).
+- [x ] Never include a value inside an issue message (only `raw` for the line, which the UI masks, see trap 2).
+
+## Step 3.2: Parser unit tests (`src/lib/parseEnv.test.ts`)
+- [x ] Table-driven tests, one per behaviour above: blank/comment lines, `export`, `=` inside values, quotes (single/double), escapes, inline comment vs `#` in value, CRLF, BOM, empty values, multiline double and single quoted, unterminated quote, invalid key, no-equals line, duplicates, key with spaces around `=`.
+- [ x] A "messy realistic file" test (a 20-line sample mixing all of the above) with the exact expected entries and issues.
+- [ x] A property-style robustness test: feed random garbage strings and assert it never throws.
+- [ x] Run `npm test`; all green before moving on.
+
+## Step 3.3: Diff service (server side)
+Create `src/lib/importDiff.ts`:
+- [ ] `loadEnvironmentForDiff(tx | db, environmentId)`: loads variables and decrypts Sensitive ones **into a local Map used only inside the function that compares**. It must never be exported in a form that a route can return.
+- [ ] `computeDiff(existingMap, parsedEntries, options)` returns rows:
+  `{ key, status: 'NEW'|'UPDATE'|'UNCHANGED', existingId?, existingVersion?, isSensitive (existing or planned), oldValue?, newValue }`
+- [ ] Classification: key missing gives NEW; key present and value differs gives UPDATE; identical gives UNCHANGED. Compare as exact strings (case-sensitive, whitespace matters).
+- [ ] For the **client-facing** shape, build a separate `ImportPreviewRowDTO`: for Sensitive rows, `oldValue`/`newValue` are replaced by `MASK` plus a boolean `valueChanged` (needed so Update still makes sense). Plain rows carry real values.
+- [ ] Summary counts: `{ new, update, unchanged, errors }`.
+- [ ] Unit test `computeDiff` with an in-memory map (no DB needed).
+
+## Step 3.4: Preview endpoint
+- [ ] `POST /api/environments/[environmentId]/import/preview`, body `{ text: string, autoFlagSensitive: boolean }` validated with zod (size caps from 3.0).
+- [ ] Call `requireEnvironmentAccess` (or your existing equivalent) first. Non-member gets 404 like everywhere else.
+- [ ] Parse, load, diff, return `{ rows: ImportPreviewRowDTO[], issues, counts }`. **Never return the raw parsed text back.**
+- [ ] `Cache-Control: no-store`.
+- [ ] Preview writes nothing (verify: no new rows in any table after a preview).
+- [ ] Make sure error handling logs only error types (existing rule).
+
+## Step 3.5: Apply endpoint
+- [ ] `POST /api/environments/[environmentId]/import/apply`, body: `{ text, autoFlagSensitive, rowOverrides?: { [key]: { skip?: boolean, isSensitive?: boolean } }, expectedVersions: { [key]: number } }`.
+- [ ] Access check, then re-parse and **recompute the diff on the server** inside a single `prisma.$transaction`.
+- [ ] For each non-skipped NEW row: `applyCreate(tx, ctx, environmentId, key, value, isSensitive)`.
+- [ ] For each non-skipped UPDATE row: reload the variable with the fields `applyUpdate` expects, compare `version` with `expectedVersions[key]`; mismatch aborts the whole transaction with a conflict error. Otherwise `applyUpdate(tx, ctx, current, { value, ... })`. Keep the existing `isSensitive`.
+- [ ] UNCHANGED rows: do nothing, write no history.
+- [ ] Use **one** `batchId` (`newBatchId()`) in `ctx` for the whole import.
+- [ ] If there are zero changes to apply, return a friendly "Nothing to import" instead of creating an empty batch.
+- [ ] Return counts only (`{ created, updated, unchanged, skipped }`), never values.
+- [ ] Test the atomicity: force a failure on the 3rd row and confirm **no** variables and **no** history rows were written.
+
+## Step 3.6: Import UI
+- [ ] "Import .env" button on the environment view opens a `Modal` (or dedicated page if it gets cramped) using only shared components (`Button`, `Textarea`, `Alert`, `Badge`, `Switch`).
+- [ ] Stage 1: large `Textarea`, helper text ("Lines starting with # are ignored"), checkbox/`Switch` "Auto-mark names like KEY, TOKEN, SECRET, PASSWORD as Sensitive", **Review** button.
+- [ ] Stage 2 (review): summary bar with counts, then a table grouped or filterable by status.
+  - Each row: status `Badge` with **text and colour** (🟢 New, 🟡 Update, ⚪ Unchanged), key, value (or masked), type.
+  - Update rows show old vs new (Sensitive ones show masked values and a "value will change" note).
+  - Per-row **Skip** checkbox; per-row Sensitive toggle for NEW rows only.
+  - Issues panel: invalid lines and duplicate warnings, with line numbers (line content masked if it could be a secret).
+- [ ] Stage 3: **Apply** button shows the exact counts ("Apply 4 changes"), disabled when there is nothing to apply or errors are blocking (decide: errors skip those lines but do not block).
+- [ ] Loading states during preview and apply; clear error `Alert` for conflict ("Variables changed since you reviewed. Review again.") and validation errors.
+- [ ] After success: close, refresh the variable list, show a success message with counts, and link to the History view.
+- [ ] Per-row reveal in the preview for Sensitive rows: **decide and document** (recommended: do not offer one in preview; the user just pasted the value, so they already know it; avoids another reveal path).
+- [ ] Clear the textarea and preview state on close so secrets don't linger in component state.
+
+## Step 3.7: History integration check
+- [ ] Apply an import with 2 NEW, 2 UPDATE (one Sensitive), 1 UNCHANGED. Confirm exactly 4 `HistoryEntry` rows, all sharing one `batchId`.
+- [ ] Confirm the history timeline groups them into one batch and Sensitive values are masked with working audited reveal.
+- [ ] Confirm a NEW key auto-flagged Sensitive stores ciphertext (`iv` non-null) in both `Variable` and `HistoryEntry` (DB inspection).
+
+## Step 3.8: Security tests for import (extend the existing automation)
+Add to `tests/security`:
+- [ ] Non-member cannot preview or apply (404), including by tampering with `environmentId`.
+- [ ] Preview response for an environment with Sensitive variables contains **no plaintext** for them (scan the JSON for the known test secret).
+- [ ] Apply response contains no values.
+- [ ] No plaintext of pasted or existing secrets appears in server logs after a failing import (extend the log scan in `sweep:http`).
+- [ ] Oversized payload and 501 entries are rejected.
+- [ ] A forged `expectedVersions` or `rowOverrides` for keys not in the pasted text has no effect.
+- [ ] Concurrent edit between preview and apply returns the conflict and writes nothing.
+- [ ] Add the new routes to the route-method and cache-header checks in the HTTP sweep (`POST` only, `no-store`).
+- [ ] Extend the plaintext-at-rest database scan to cover rows created by imports.
+
+## Step 3.9: Optional extras (pick by time; none are required)
+- [ ] `.env` export for authorized users (audit it like a reveal: every Sensitive value exported must be logged).
+- [ ] Restore a previous version from history, and a diff view between versions.
+- [ ] Clone one environment into another (reuse the import apply path).
+- [ ] Drag-and-drop of a `.env` file into the textarea (read client-side with `FileReader`; same size cap).
+
+## Step 3.10: Polish pass
+- [ ] **Error-message review:** read every message in the app aloud; each must say what went wrong and what to do.
+- [ ] **Loading and empty states** on every page (dashboard, project, environment with no variables, history with no entries).
+- [ ] **UI consistency sweep:** grep for ad-hoc `<button` / `<input` / `<textarea` outside `components/ui`; there should be none.
+- [ ] **Accessibility basics:** labels on inputs, focus states, modal closes on Escape, status not conveyed by colour alone.
+- [ ] **Responsive check** at phone width for the preview table (horizontal scroll inside its own container).
+- [ ] Run `npm run lint`, `npx tsc --noEmit`, `npm run build` (production build must succeed, not just dev).
+- [ ] Update `prisma/seed.ts` so the demo includes an environment ready for a messy-paste demo (some matching keys, some different, some new).
+- [ ] Add a `docs/sample.env` with a deliberately messy sample (comments, quotes, `export`, duplicates, an invalid line) for the live demo.
+- [ ] README: mark Phase 3 done, document the parser rules (including "no `${VAR}` expansion", "last duplicate wins"), the import behaviour and its assumptions, and the new scripts.
+- [ ] Fresh-clone test: clone into a new folder, follow only the README, confirm it runs. Fix any README gap.
+- [ ] Write the **demo script** (below).
+
+## Demo script (write it into the README or `docs/DEMO.md`)
+1. Log in as alice; show the dashboard and the project.
+2. Create an environment, add one Standard and one Sensitive variable; show masking and audited Reveal.
+3. Open `docs/sample.env`, paste it, click Review; point out 🟢/🟡/⚪ rows, masked Sensitive values, the duplicate warning and the invalid line.
+4. Skip one row, Apply; show the success counts.
+5. Open History; show the single import batch, masked values and a reveal.
+6. Log in as bob (a member) and show the changes; show that a non-member gets 404 on a copied URL.
+7. Show the DB (ciphertext and bcrypt hashes) and `npm run test:security` passing.
+
+## Phase 3: Definition of Done
+- [ ] Parser unit tests pass for every edge case listed in 3.1.
+- [ ] A messy pasted `.env` shows the correct New/Update/Unchanged breakdown **before** saving, with text labels and colours.
+- [ ] Update rows show old vs new for Standard variables; Sensitive rows show masked values only.
+- [ ] Applying creates/updates the right variables and **exactly one** history batch; a failure writes nothing.
+- [ ] Existing keys keep their type; new keys default per the auto-flag setting; missing keys are never deleted.
+- [ ] No plaintext of Sensitive values in any preview/apply response, page source, network tab, server log, `Variable` or `HistoryEntry` rows.
+- [ ] Security suite and HTTP sweep extended and passing.
+- [ ] `npm run build`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run test:security` all clean.
+- [ ] A full demo run works end to end from a fresh seed on a fresh clone.
+- [ ] README complete and accurate.
+
+## Phase 3 final handoff notes (fill in at the end)
+- Final file layout / route names: _(fill in)_
+- Deviations from this plan: _(fill in)_
+- Known issues / limits: _(fill in)_
+
+## Phase 3: Traps to watch
+1. **Returning plaintext in the preview.** The diff needs decrypted values, and it is very easy to return the `existing` map. Keep decrypted data inside one function and return only the DTO built for the client.
+2. **Echoing pasted secrets back.** Error messages, issue `raw` lines, validation errors from zod, and logs can all contain what the user pasted. Mask or omit them; never `console.log` the body.
+3. **Trusting the client at apply time.** If apply accepts the preview rows from the client, a user can inject arbitrary writes or change types. Always re-parse and re-diff on the server.
+4. **Stale preview.** Someone edits a variable between preview and apply. Without version checks, the import silently overwrites it.
+5. **Partial writes.** Looping with separate queries instead of one transaction leaves half an import and fragmented history. Use one `$transaction` and one `batchId`.
+6. **Writing history for UNCHANGED rows** (noise), or creating an empty batch when nothing changed.
+7. **Accidentally changing type on update.** A parser has no concept of type; make sure Update keeps the existing `isSensitive`, or an import would silently turn a secret into plain text.
+8. **Parser pitfalls:** splitting on every `=`, treating `#` inside a value as a comment (`COLOR=#fff`, URL fragments), forgetting multiline quoted values, forgetting CRLF/BOM from Windows editors, and catastrophic regexes on large input.
+9. **Dedupe confusion:** duplicate keys that differ only by case (`Port` vs `PORT`) are different keys by assumption 3; make sure the preview does not merge them.
+10. **No size limit.** A giant paste can freeze the browser or the server. Enforce the caps on both client and server.
+11. **Secrets lingering in client state.** Clear the textarea and preview rows on close and after apply.
+12. **Auto-flag surprises:** `KEY` also matches harmless names like `MONKEY` or `KEYBOARD_LAYOUT`. Show it as an editable default, not a hidden rule.
+13. **Tests that pass against fake data only:** include a real-looking secret in the test fixtures and scan responses/logs/DB for it, as you did in Phase 2.
+14. **Demo day:** the HTTP sweep leaves throwaway rows in the dev DB; run `npx prisma migrate reset` and reseed before the final demo.
+
+_When Phase 3 is done, tick the Status Tracker and add the final handoff notes._
 
 ### Optional extras (pick based on time)
 - Per-row checkboxes to skip lines in the preview.
